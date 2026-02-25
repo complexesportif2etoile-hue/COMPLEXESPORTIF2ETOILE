@@ -1,9 +1,0 @@
-<svg viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
-  <rect width="180" height="180" rx="36" fill="#0f172a"/>
-  <circle cx="90" cy="80" r="48" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
-  <polygon points="90,52 100,59 97,72 83,72 80,59" fill="#1e293b" stroke="white" stroke-width="1" opacity="0.9"/>
-  <polygon points="70,80 74,69 84,67 89,76 81,85" fill="#1e293b" stroke="white" stroke-width="1" opacity="0.9"/>
-  <polygon points="110,80 106,69 96,67 91,76 99,85" fill="#1e293b" stroke="white" stroke-width="1" opacity="0.9"/>
-  <polygon points="81,100 86,91 90,89 94,91 99,100 94,105 86,105" fill="#1e293b" stroke="white" stroke-width="1" opacity="0.9"/>
-  <text x="90" y="150" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="17" font-weight="700" fill="#10b981">FootField</text>
-</svg>
