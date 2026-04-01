@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Shield, Edit2, X, Loader2, Check } from 'lucide-react';
+import { Plus, Shield, CreditCard as Edit2, X, Loader2, Check, Trash2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { Profile } from '../../types';
@@ -26,6 +26,8 @@ export function UserManagement() {
   const [inviteError, setInviteError] = useState('');
   const [editingUser, setEditingUser] = useState<Profile | null>(null);
   const [editRole, setEditRole] = useState<typeof ROLES[number]>('user');
+  const [deletingUser, setDeletingUser] = useState<Profile | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const fetchUsers = async () => {
     const { data } = await supabase.from('profiles').select('*').order('created_at');
@@ -73,6 +75,21 @@ export function UserManagement() {
     await fetchUsers();
   };
 
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
+    setDeleteLoading(true);
+    try {
+      const { error } = await supabase.auth.admin.deleteUser(deletingUser.id);
+      if (error) throw error;
+      await fetchUsers();
+      setDeletingUser(null);
+    } catch (err: unknown) {
+      console.error('Erreur lors de la suppression:', err);
+      alert(err instanceof Error ? err.message : 'Erreur lors de la suppression');
+    }
+    setDeleteLoading(false);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -118,14 +135,23 @@ export function UserManagement() {
                     <button
                       onClick={() => { setEditingUser(u); setEditRole(u.role as typeof ROLES[number]); }}
                       className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-all"
+                      title="Modifier le rôle"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleToggleActive(u)}
                       className={`p-1.5 rounded-lg transition-all ${u.active ? 'text-slate-500 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-500 hover:text-emerald-400 hover:bg-emerald-500/10'}`}
+                      title={u.active ? 'Désactiver' : 'Activer'}
                     >
                       <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeletingUser(u)}
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                      title="Supprimer définitivement"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 )}
@@ -194,6 +220,54 @@ export function UserManagement() {
               <div className="flex gap-3">
                 <button type="button" onClick={() => setEditingUser(null)} className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm transition-all">Annuler</button>
                 <button onClick={handleUpdateRole} className="flex-1 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white font-medium rounded-xl text-sm transition-all">Sauvegarder</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+              <h2 className="font-semibold text-white">Supprimer l'utilisateur</h2>
+              <button onClick={() => setDeletingUser(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-start gap-3">
+                <Trash2 className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-red-300 mb-1">Action irréversible</p>
+                  <p className="text-xs text-red-400">
+                    Cette action supprimera définitivement l'utilisateur et toutes ses données associées. Cette opération ne peut pas être annulée.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-800/50 rounded-xl p-4">
+                <p className="text-xs text-slate-500 mb-2">Utilisateur à supprimer</p>
+                <p className="text-sm font-medium text-slate-200">{deletingUser.full_name || deletingUser.email}</p>
+                <p className="text-xs text-slate-400 mt-1">{deletingUser.email}</p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeletingUser(null)}
+                  className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm transition-all"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleDeleteUser}
+                  disabled={deleteLoading}
+                  className="flex-1 px-4 py-2.5 bg-red-500 hover:bg-red-400 disabled:opacity-50 text-white font-medium rounded-xl text-sm transition-all flex items-center justify-center gap-2"
+                >
+                  {deleteLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Supprimer définitivement
+                </button>
               </div>
             </div>
           </div>
