@@ -28,7 +28,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'backup', label: 'Sauvegarde', icon: Database, permission: 'view_backup' },
 ];
 
-const BOTTOM_NAV_IDS = ['dashboard', 'calendar', 'terrains', 'rapports', 'settings'];
+const BOTTOM_NAV_IDS = ['dashboard', 'calendar', 'terrains', 'rapports', 'settings', '__more__'];
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -164,34 +164,46 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
           {children}
         </main>
 
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-10 safe-area-bottom">
-          <div className="flex items-center justify-around px-1 py-2">
-            {bottomNavItems.slice(0, 4).map((item) => {
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-10">
+          <div className="flex items-end justify-around px-1 pt-2 pb-3">
+            {bottomNavItems.filter(i => i.id !== '__more__').slice(0, 5).map((item) => {
               const Icon = item.icon;
               const active = currentView === item.id;
+              const shortLabel = item.id === 'dashboard' ? 'Tableau'
+                : item.id === 'calendar' ? 'Calendr...'
+                : item.id === 'terrains' ? 'Terrains'
+                : item.id === 'rapports' ? 'Rapports'
+                : item.id === 'settings' ? 'Configu...'
+                : item.label.slice(0, 8);
               return (
                 <button
                   key={item.id}
                   onClick={() => handleNavClick(item.id)}
-                  className="flex flex-col items-center gap-1 px-3 py-1 min-w-0 flex-1"
+                  className="flex flex-col items-center gap-1 min-w-0 flex-1"
                 >
-                  <div className={`p-1.5 rounded-xl transition-all ${active ? 'bg-emerald-500/10' : ''}`}>
+                  <div className={`
+                    w-12 h-10 flex items-center justify-center rounded-xl transition-all
+                    ${active ? 'bg-emerald-500/15 border border-emerald-500/30' : ''}
+                  `}>
                     <Icon className={`w-5 h-5 transition-colors ${active ? 'text-emerald-400' : 'text-slate-500'}`} />
                   </div>
-                  <span className={`text-xs truncate max-w-full transition-colors ${active ? 'text-emerald-400 font-semibold' : 'text-slate-500'}`}>
-                    {item.label === 'Tableau de bord' ? 'Tableau' : item.label.slice(0, 7)}
+                  <span className={`text-xs transition-colors leading-none ${active ? 'text-emerald-400 font-semibold' : 'text-slate-500'}`}>
+                    {shortLabel}
                   </span>
                 </button>
               );
             })}
             <button
               onClick={() => setSidebarOpen(true)}
-              className="flex flex-col items-center gap-1 px-3 py-1 min-w-0 flex-1"
+              className="flex flex-col items-center gap-1 min-w-0 flex-1"
             >
-              <div className={`p-1.5 rounded-xl transition-all ${!bottomNavItems.slice(0, 4).some(i => i.id === currentView) ? 'bg-emerald-500/10' : ''}`}>
-                <MoreHorizontal className={`w-5 h-5 transition-colors ${!bottomNavItems.slice(0, 4).some(i => i.id === currentView) ? 'text-emerald-400' : 'text-slate-500'}`} />
+              <div className={`
+                w-12 h-10 flex items-center justify-center rounded-xl transition-all
+                ${!bottomNavItems.filter(i => i.id !== '__more__').slice(0, 5).some(i => i.id === currentView) ? 'bg-emerald-500/15 border border-emerald-500/30' : ''}
+              `}>
+                <MoreHorizontal className={`w-5 h-5 transition-colors ${!bottomNavItems.filter(i => i.id !== '__more__').slice(0, 5).some(i => i.id === currentView) ? 'text-emerald-400' : 'text-slate-500'}`} />
               </div>
-              <span className={`text-xs transition-colors ${!bottomNavItems.slice(0, 4).some(i => i.id === currentView) ? 'text-emerald-400 font-semibold' : 'text-slate-500'}`}>
+              <span className={`text-xs leading-none transition-colors ${!bottomNavItems.filter(i => i.id !== '__more__').slice(0, 5).some(i => i.id === currentView) ? 'text-emerald-400 font-semibold' : 'text-slate-500'}`}>
                 Plus
               </span>
             </button>
