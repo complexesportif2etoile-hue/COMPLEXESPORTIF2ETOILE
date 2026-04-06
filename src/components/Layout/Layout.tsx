@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   LayoutDashboard, Calendar, MapPin, Users, ClipboardList,
   BarChart2, Settings, CreditCard, Database, Menu, X, LogOut,
-  Shield, ChevronRight, TrendingDown
+  Shield, ChevronRight, TrendingDown, MoreHorizontal
 } from 'lucide-react';
 
 interface NavItem {
@@ -28,6 +28,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'backup', label: 'Sauvegarde', icon: Database, permission: 'view_backup' },
 ];
 
+const BOTTOM_NAV_IDS = ['dashboard', 'calendar', 'terrains', 'rapports', 'settings'];
+
 interface LayoutProps {
   children: React.ReactNode;
   currentView: string;
@@ -46,16 +48,20 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
     return true;
   });
 
+  const bottomNavItems = visibleItems.filter((i) => BOTTOM_NAV_IDS.includes(i.id));
+
   const handleNavClick = (id: string) => {
     onViewChange(id);
     setSidebarOpen(false);
   };
 
+  const currentLabel = visibleItems.find((i) => i.id === currentView)?.label || 'Complexe Sportif';
+
   return (
     <div className="flex h-screen bg-slate-950 overflow-hidden">
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-20 lg:hidden"
+          className="fixed inset-0 bg-black/70 z-20 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -66,13 +72,19 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
         <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-800">
-          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0">
+          <div className="w-9 h-9 bg-emerald-500 rounded-xl flex items-center justify-center flex-shrink-0">
             <MapPin className="w-4 h-4 text-white" />
           </div>
           <div className="min-w-0">
             <p className="font-bold text-white text-sm leading-tight truncate">Complexe Sportif</p>
             <p className="text-xs text-slate-400 truncate">Gestion</p>
           </div>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="lg:hidden ml-auto p-1 rounded-lg text-slate-400 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
@@ -92,7 +104,7 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
                   }
                 `}
               >
-                <Icon className={`w-4.5 h-4.5 flex-shrink-0 ${active ? 'text-emerald-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+                <Icon className={`w-4 h-4 flex-shrink-0 ${active ? 'text-emerald-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
                 <span className="truncate">{item.label}</span>
                 {active && <ChevronRight className="w-3.5 h-3.5 ml-auto text-emerald-500" />}
               </button>
@@ -123,21 +135,68 @@ export function Layout({ children, currentView, onViewChange }: LayoutProps) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="lg:hidden flex items-center gap-4 px-4 py-3 bg-slate-900 border-b border-slate-800 flex-shrink-0">
+        <header className="lg:hidden flex items-center gap-3 px-4 py-3 bg-slate-900 border-b border-slate-800 flex-shrink-0">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors"
+            className="p-2 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors flex-shrink-0"
           >
-            {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            <Menu className="w-5 h-5" />
           </button>
-          <span className="font-semibold text-white text-sm">
-            {visibleItems.find((i) => i.id === currentView)?.label || 'Complexe Sportif'}
-          </span>
+
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <div className="w-7 h-7 bg-emerald-500 rounded-lg flex items-center justify-center flex-shrink-0">
+              <MapPin className="w-3.5 h-3.5 text-white" />
+            </div>
+            <span className="font-bold text-white text-sm truncate uppercase tracking-wide">
+              COMPLEXE SPORTIF 2e ETOILE
+            </span>
+          </div>
+
+          <button
+            onClick={signOut}
+            className="p-2 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors flex-shrink-0"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 lg:pb-6">
           {children}
         </main>
+
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-10 safe-area-bottom">
+          <div className="flex items-center justify-around px-1 py-2">
+            {bottomNavItems.slice(0, 4).map((item) => {
+              const Icon = item.icon;
+              const active = currentView === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleNavClick(item.id)}
+                  className="flex flex-col items-center gap-1 px-3 py-1 min-w-0 flex-1"
+                >
+                  <div className={`p-1.5 rounded-xl transition-all ${active ? 'bg-emerald-500/10' : ''}`}>
+                    <Icon className={`w-5 h-5 transition-colors ${active ? 'text-emerald-400' : 'text-slate-500'}`} />
+                  </div>
+                  <span className={`text-xs truncate max-w-full transition-colors ${active ? 'text-emerald-400 font-semibold' : 'text-slate-500'}`}>
+                    {item.label === 'Tableau de bord' ? 'Tableau' : item.label.slice(0, 7)}
+                  </span>
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="flex flex-col items-center gap-1 px-3 py-1 min-w-0 flex-1"
+            >
+              <div className={`p-1.5 rounded-xl transition-all ${!bottomNavItems.slice(0, 4).some(i => i.id === currentView) ? 'bg-emerald-500/10' : ''}`}>
+                <MoreHorizontal className={`w-5 h-5 transition-colors ${!bottomNavItems.slice(0, 4).some(i => i.id === currentView) ? 'text-emerald-400' : 'text-slate-500'}`} />
+              </div>
+              <span className={`text-xs transition-colors ${!bottomNavItems.slice(0, 4).some(i => i.id === currentView) ? 'text-emerald-400 font-semibold' : 'text-slate-500'}`}>
+                Plus
+              </span>
+            </button>
+          </div>
+        </nav>
       </div>
     </div>
   );

@@ -1,14 +1,16 @@
 import { useMemo } from 'react';
 import { useData } from '../../contexts/DataContext';
-import { Calendar, TrendingUp, TrendingDown, Clock, AlertCircle, MapPin } from 'lucide-react';
-import { format, isToday, parseISO } from '../utils/dateUtils';
+import { useAuth } from '../../contexts/AuthContext';
+import { Calendar, TrendingUp, TrendingDown, CheckCircle, MapPin, Plus, ArrowUpRight } from 'lucide-react';
+import { format, parseISO } from '../utils/dateUtils';
 
 interface DashboardProps {
   onNavigate: (view: string) => void;
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
-  const { reservations, terrains, clients, encaissements, depenses } = useData();
+  const { reservations, terrains, encaissements, depenses } = useData();
+  const { profile } = useAuth();
 
   const stats = useMemo(() => {
     const today = new Date();
@@ -24,185 +26,215 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       ['réservé', 'check_in', 'en_attente'].includes(r.statut)
     );
 
+    const freeTerrains = terrains.filter((t) => {
+      const hasActiveRes = reservations.some(
+        (r) => r.terrain_id === t.id && r.statut === 'check_in'
+      );
+      return t.is_active && !hasActiveRes;
+    });
+
+    const todayEnc = encaissements.filter((e) => {
+      const d = new Date(e.created_at);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime() === today.getTime();
+    });
+    const todayRevenue = todayEnc.reduce((s, e) => s + e.montant_total, 0);
+
+    const totalRevenue = encaissements.reduce((s, e) => s + e.montant_total, 0);
+
     const thisMonthEnc = encaissements.filter((e) => {
       const d = new Date(e.created_at);
       return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
     });
-
-    const monthRevenue = thisMonthEnc.reduce((sum, e) => sum + e.montant_total, 0);
+    const monthRevenue = thisMonthEnc.reduce((s, e) => s + e.montant_total, 0);
 
     const thisMonthDep = depenses.filter((d) => {
       const parts = d.date_depense.slice(0, 7).split('-');
       return parseInt(parts[1]) - 1 === today.getMonth() && parseInt(parts[0]) === today.getFullYear();
     });
-    const monthDepenses = thisMonthDep.reduce((sum, d) => sum + d.montant, 0);
+    const monthDepenses = thisMonthDep.reduce((s, d) => s + d.montant, 0);
     const monthBenefice = monthRevenue - monthDepenses;
 
-    const pendingPayment = reservations.filter((r) =>
-      r.payment_status === 'UNPAID' && ['réservé', 'check_in'].includes(r.statut)
-    );
+    const inCours = reservations.filter((r) => r.statut === 'check_in');
 
-    return { todayRes, activeRes, monthRevenue, monthDepenses, monthBenefice, pendingPayment, clients };
-  }, [reservations, clients, encaissements, depenses]);
+    return {
+      todayRes, activeRes, freeTerrains, todayRevenue, totalRevenue,
+      monthRevenue, monthDepenses, monthBenefice, inCours,
+    };
+  }, [reservations, terrains, encaissements, depenses]);
 
-  const upcomingReservations = useMemo(() => {
-    const now = new Date();
-    return reservations
-      .filter((r) => new Date(r.date_debut) >= now && ['réservé', 'check_in', 'en_attente'].includes(r.statut))
-      .slice(0, 6);
+  const recentReservations = useMemo(() => {
+    return [...reservations]
+      .filter((r) => r.statut !== 'annulé')
+      .sort((a, b) => new Date(b.created_at || b.date_debut).getTime() - new Date(a.created_at || a.date_debut).getTime())
+      .slice(0, 5);
   }, [reservations]);
 
-  const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('fr-FR').format(amount) + ' FCFA';
+  const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(n);
 
-  const getStatusColor = (statut: string) => {
-    switch (statut) {
-      case 'check_in': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-      case 'réservé': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
-      case 'en_attente': return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-      default: return 'bg-slate-700/50 text-slate-400 border-slate-600/20';
-    }
-  };
+  const upcomingCount = useMemo(() =>
+    reservations.filter((r) => new Date(r.date_debut) >= new Date() && ['réservé', 'en_attente'].includes(r.statut)).length,
+    [reservations]
+  );
 
-  const getStatusLabel = (statut: string) => {
-    const labels: Record<string, string> = {
-      réservé: 'Réservé', check_in: 'En cours', en_attente: 'En attente',
-      terminé: 'Terminé', annulé: 'Annulé', bloqué: 'Bloqué',
-    };
-    return labels[statut] || statut;
-  };
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Bonjour';
+    if (h < 18) return 'Bon après-midi';
+    return 'Bonsoir';
+  })();
+
+  const displayName = profile?.full_name
+    ? profile.full_name.split(' ')[0]
+    : (profile?.role === 'admin' ? 'Administrateur' : 'Gestionnaire');
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">Tableau de bord</h1>
-        <p className="text-slate-400 text-sm mt-1">Vue d'ensemble de votre complexe sportif</p>
+    <div className="space-y-5 pb-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">{greeting}, {displayName}</h1>
+          <p className="text-slate-400 text-sm mt-0.5">
+            {upcomingCount > 0
+              ? `${upcomingCount} réservation${upcomingCount > 1 ? 's' : ''} à venir`
+              : 'Aucune réservation à venir'}
+          </p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <button
+        onClick={() => onNavigate('calendar')}
+        className="w-full bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-white font-semibold py-4 rounded-2xl flex items-center justify-center gap-2 text-base transition-all shadow-lg shadow-emerald-500/20"
+      >
+        <Plus className="w-5 h-5" />
+        Nouvelle Réservation
+      </button>
+
+      <div className="grid grid-cols-2 gap-3">
         <StatCard
-          icon={Calendar}
-          label="Réservations aujourd'hui"
-          value={stats.todayRes.length}
-          color="emerald"
-          onClick={() => onNavigate('calendar')}
+          badge={`SUR ${terrains.filter(t => t.is_active).length}`}
+          badgeColor="emerald"
+          icon={CheckCircle}
+          iconColor="text-emerald-400"
+          value={stats.freeTerrains.length}
+          label="LIBRES MAINTENANT"
+          onClick={() => onNavigate('terrains')}
         />
         <StatCard
-          icon={Clock}
-          label="Réservations actives"
-          value={stats.activeRes.length}
-          color="blue"
+          badge={stats.activeRes.length > 0 ? `${Math.round((stats.inCours.length / Math.max(terrains.filter(t=>t.is_active).length, 1)) * 100)}%` : '0%'}
+          badgeColor="red"
+          icon={MapPin}
+          iconColor="text-red-400"
+          value={stats.inCours.length}
+          label="EN COURS"
           onClick={() => onNavigate('reservations')}
         />
         <StatCard
+          badge="CFA"
+          badgeColor="blue"
           icon={TrendingUp}
-          label="Encaissements ce mois"
-          value={formatCurrency(stats.monthRevenue)}
-          color="cyan"
+          iconColor="text-blue-400"
+          value={fmt(stats.todayRevenue)}
+          label="REVENUS DU JOUR"
           onClick={() => onNavigate('rapports')}
         />
         <StatCard
-          icon={AlertCircle}
-          label="Paiements en attente"
-          value={stats.pendingPayment.length}
-          color="amber"
-          onClick={() => onNavigate('payments')}
+          badge="CFA CUMUL"
+          badgeColor="amber"
+          icon={TrendingUp}
+          iconColor="text-amber-400"
+          value={fmt(stats.totalRevenue)}
+          label="TOTAL REVENUS"
+          onClick={() => onNavigate('rapports')}
         />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <StatCard
+          badge="CFA"
+          badgeColor="red"
           icon={TrendingDown}
-          label="Dépenses ce mois"
-          value={formatCurrency(stats.monthDepenses)}
-          color="red"
+          iconColor="text-red-400"
+          value={fmt(stats.monthDepenses)}
+          label="DÉPENSES CE MOIS"
           onClick={() => onNavigate('depenses')}
         />
         <StatCard
-          icon={TrendingUp}
-          label="Bénéfice net ce mois"
-          value={formatCurrency(stats.monthBenefice)}
-          color={stats.monthBenefice >= 0 ? 'emerald' : 'red'}
+          badge={stats.monthBenefice >= 0 ? 'BÉNÉFICE' : 'DÉFICIT'}
+          badgeColor={stats.monthBenefice >= 0 ? 'emerald' : 'red'}
+          icon={stats.monthBenefice >= 0 ? TrendingUp : TrendingDown}
+          iconColor={stats.monthBenefice >= 0 ? 'text-emerald-400' : 'text-red-400'}
+          value={fmt(Math.abs(stats.monthBenefice))}
+          label="BÉNÉFICE NET"
           onClick={() => onNavigate('rapports')}
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-            <h2 className="font-semibold text-white">Prochaines réservations</h2>
-            <button
-              onClick={() => onNavigate('reservations')}
-              className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
-            >
-              Voir tout
-            </button>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+        <div className="px-4 py-3.5 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-white text-sm">Dernières Réservations</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Les 5 plus récentes</p>
           </div>
-          <div className="divide-y divide-slate-800">
-            {upcomingReservations.length === 0 ? (
-              <div className="px-5 py-10 text-center text-slate-500 text-sm">
-                Aucune réservation à venir
-              </div>
-            ) : (
-              upcomingReservations.map((r) => (
-                <div key={r.id} className="px-5 py-3 flex items-center gap-4 hover:bg-slate-800/40 transition-colors">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-200 truncate">{r.client_name}</p>
-                    <p className="text-xs text-slate-500 truncate">
-                      {r.terrain?.name} — {format(parseISO(r.date_debut), 'dd/MM à HH:mm')}
-                    </p>
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(r.statut)}`}>
-                    {getStatusLabel(r.statut)}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
+          <button
+            onClick={() => onNavigate('reservations')}
+            className="flex items-center gap-1 text-xs font-medium text-emerald-400 hover:text-emerald-300 transition-colors"
+          >
+            Voir tout
+            <ArrowUpRight className="w-3.5 h-3.5" />
+          </button>
         </div>
 
-        <div className="space-y-4">
-          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
-            <h2 className="font-semibold text-white mb-4">Terrains</h2>
-            <div className="space-y-3">
-              {terrains.slice(0, 4).map((t) => (
-                <div key={t.id} className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${t.is_active ? 'bg-emerald-500' : 'bg-slate-600'}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-200 truncate">{t.name}</p>
-                    <p className="text-xs text-slate-500">{new Intl.NumberFormat('fr-FR').format(t.tarif_horaire)} FCFA/h</p>
-                  </div>
-                  <span className={`text-xs ${t.is_active ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {t.is_active ? 'Actif' : 'Inactif'}
-                  </span>
+        <div className="divide-y divide-slate-800/60">
+          <div className="grid grid-cols-2 px-4 py-2">
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Client</span>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider text-right">Montant</span>
+          </div>
+          {recentReservations.length === 0 ? (
+            <div className="px-4 py-8 text-center text-slate-500 text-sm">Aucune réservation</div>
+          ) : (
+            recentReservations.map((r) => (
+              <div key={r.id} className="grid grid-cols-2 px-4 py-3.5 hover:bg-slate-800/30 transition-colors">
+                <div>
+                  <p className="text-sm font-medium text-slate-100">{r.client_name}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {r.terrain?.name
+                      ? r.terrain.name
+                      : format(parseISO(r.date_debut), 'dd/MM à HH:mm')}
+                  </p>
                 </div>
-              ))}
-              {terrains.length === 0 && (
-                <p className="text-slate-500 text-sm text-center py-3">Aucun terrain</p>
-              )}
-            </div>
-            <button
-              onClick={() => onNavigate('terrains')}
-              className="mt-4 w-full text-xs text-emerald-400 hover:text-emerald-300 transition-colors text-center"
-            >
-              Gérer les terrains
-            </button>
-          </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-white">{fmt(r.amount_due)}</p>
+                  <p className={`text-xs mt-0.5 ${r.payment_status === 'PAID' ? 'text-emerald-400' : r.payment_status === 'PARTIAL' ? 'text-amber-400' : 'text-red-400'}`}>
+                    {r.payment_status === 'PAID' ? 'Payé' : r.payment_status === 'PARTIAL' ? 'Partiel' : 'Impayé'}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
 
-          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5">
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="font-semibold text-white">Clients</h2>
-              <span className="text-2xl font-bold text-emerald-400">{clients.length}</span>
-            </div>
-            <p className="text-xs text-slate-500 mb-4">clients enregistrés</p>
-            <button
-              onClick={() => onNavigate('clients')}
-              className="w-full text-xs text-emerald-400 hover:text-emerald-300 transition-colors text-center"
-            >
-              Gérer les clients
-            </button>
-          </div>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold text-white text-sm">Terrains</h2>
+          <button onClick={() => onNavigate('terrains')} className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1">
+            Gérer <ArrowUpRight className="w-3 h-3" />
+          </button>
+        </div>
+        <div className="space-y-2.5">
+          {terrains.slice(0, 5).map((t) => {
+            const isBusy = reservations.some((r) => r.terrain_id === t.id && r.statut === 'check_in');
+            return (
+              <div key={t.id} className="flex items-center gap-3">
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isBusy ? 'bg-red-500' : t.is_active ? 'bg-emerald-500' : 'bg-slate-600'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-slate-200 truncate">{t.name}</p>
+                </div>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isBusy ? 'bg-red-500/10 text-red-400' : t.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700/50 text-slate-500'}`}>
+                  {isBusy ? 'Occupé' : t.is_active ? 'Libre' : 'Inactif'}
+                </span>
+                <span className="text-xs text-slate-500 flex-shrink-0">{fmt(t.tarif_horaire)}/h</span>
+              </div>
+            );
+          })}
+          {terrains.length === 0 && <p className="text-slate-500 text-sm text-center py-3">Aucun terrain</p>}
         </div>
       </div>
     </div>
@@ -210,32 +242,37 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 }
 
 interface StatCardProps {
+  badge: string;
+  badgeColor: 'emerald' | 'blue' | 'cyan' | 'amber' | 'red';
   icon: React.ElementType;
-  label: string;
+  iconColor: string;
   value: string | number;
-  color: 'emerald' | 'blue' | 'cyan' | 'amber' | 'red';
+  label: string;
   onClick?: () => void;
 }
 
-function StatCard({ icon: Icon, label, value, color, onClick }: StatCardProps) {
-  const colors = {
-    emerald: 'bg-emerald-500/10 text-emerald-400',
-    blue: 'bg-blue-500/10 text-blue-400',
-    cyan: 'bg-cyan-500/10 text-cyan-400',
-    amber: 'bg-amber-500/10 text-amber-400',
-    red: 'bg-red-500/10 text-red-400',
+function StatCard({ badge, badgeColor, icon: Icon, iconColor, value, label, onClick }: StatCardProps) {
+  const badgeColors = {
+    emerald: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+    blue: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    cyan: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+    amber: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+    red: 'bg-red-500/10 text-red-400 border-red-500/20',
   };
 
   return (
     <button
       onClick={onClick}
-      className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-left hover:border-slate-700 hover:bg-slate-800/50 transition-all w-full"
+      className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-left hover:border-slate-700 active:scale-[0.97] transition-all w-full"
     >
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${colors[color]}`}>
-        <Icon className="w-5 h-5" />
+      <div className="flex items-start justify-between mb-3">
+        <Icon className={`w-5 h-5 ${iconColor}`} />
+        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${badgeColors[badgeColor]}`}>
+          {badge}
+        </span>
       </div>
-      <p className="text-2xl font-bold text-white mb-1">{value}</p>
-      <p className="text-xs text-slate-400 leading-tight">{label}</p>
+      <p className="text-2xl font-bold text-white mb-1 leading-none">{value}</p>
+      <p className="text-xs text-slate-500 uppercase tracking-wider leading-tight">{label}</p>
     </button>
   );
 }
