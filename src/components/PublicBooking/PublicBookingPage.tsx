@@ -1,25 +1,31 @@
 import { useState, useEffect, useMemo } from 'react';
-import { MapPin, CheckCircle, Loader2, Sun, Moon, ChevronDown, ChevronUp } from 'lucide-react';
+import { MapPin, CheckCircle, Loader2, Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { Terrain, DepositSettings } from '../../types';
-import { calcTarifBySlots } from '../utils/tarifUtils';
+import {
+  TARIF_JOUR, TARIF_NUIT,
+  SlotHour, buildDaySlots,
+  calcTotalFromSlots, slotsToRange, areConsecutive, fmt,
+} from '../utils/tarifUtils';
 
-type Step = 'terrain' | 'datetime' | 'info' | 'payment' | 'confirm';
+type Step = 'terrain' | 'slots' | 'info' | 'payment' | 'confirm';
+
+const MONTH_NAMES = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+const DAY_NAMES = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
 
 export function PublicBookingPage() {
   const [step, setStep] = useState<Step>('terrain');
   const [terrains, setTerrains] = useState<Terrain[]>([]);
   const [depositSettings, setDepositSettings] = useState<DepositSettings | null>(null);
   const [selectedTerrain, setSelectedTerrain] = useState<Terrain | null>(null);
-  const [dateDebut, setDateDebut] = useState('');
-  const [dateFin, setDateFin] = useState('');
+  const [selectedSlots, setSelectedSlots] = useState<SlotHour[]>([]);
+  const [calDate, setCalDate] = useState<Date>(() => { const d = new Date(); d.setHours(0,0,0,0); return d; });
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'ON_SITE' | 'WAVE' | 'ORANGE_MONEY'>('ON_SITE');
   const [loading, setLoading] = useState(false);
   const [bookingCode, setBookingCode] = useState('');
   const [error, setError] = useState('');
-  const [showBreakdown, setShowBreakdown] = useState(false);
 
   useEffect(() => {
     supabase.from('terrains').select('*').eq('is_active', true).then(({ data }) => {
@@ -30,61 +36,68 @@ export function PublicBookingPage() {
     });
   }, []);
 
-  const tarifResult = useMemo(() => {
-    if (!selectedTerrain || !dateDebut || !dateFin) return null;
-    const debut = new Date(dateDebut);
-    const fin = new Date(dateFin);
-    if (fin <= debut) return null;
-    return calcTarifBySlots(debut, fin, selectedTerrain);
-  }, [selectedTerrain, dateDebut, dateFin]);
+  const daySlots = useMemo(() => buildDaySlots(calDate), [calDate]);
+  const nextDaySlots = useMemo(() => {
+    const next = new Date(calDate);
+    next.setDate(next.getDate() + 1);
+    return buildDaySlots(next);
+  }, [calDate]);
+  const allVisibleSlots = useMemo(() => [...daySlots, ...nextDaySlots.slice(0, 8)], [daySlots, nextDaySlots]);
 
-  const tarif = tarifResult?.total || 0;
+  const isSlotSelected = (slot: SlotHour) =>
+    selectedSlots.some(s => s.startDate.getTime() === slot.startDate.getTime());
+
+  const toggleSlot = (slot: SlotHour) => {
+    if (isSlotSelected(slot)) {
+      setSelectedSlots(prev => prev.filter(s => s.startDate.getTime() !== slot.startDate.getTime()));
+    } else {
+      setSelectedSlots(prev => [...prev, slot]);
+    }
+  };
+
+  const total = calcTotalFromSlots(selectedSlots);
+  const range = slotsToRange(selectedSlots);
+  const consecutive = areConsecutive(selectedSlots);
 
   const calcDeposit = () => {
-    if (!depositSettings) return tarif;
+    if (!depositSettings) return total;
     if (depositSettings.deposit_type === 'PERCENTAGE') {
-      return Math.ceil((tarif * depositSettings.deposit_value) / 100);
+      return Math.ceil((total * depositSettings.deposit_value) / 100);
     }
     return depositSettings.deposit_value;
   };
-
   const deposit = calcDeposit();
 
-  const formatDatetimeLocal = (date: Date) => {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  const navigateDate = (dir: number) => {
+    const d = new Date(calDate);
+    d.setDate(d.getDate() + dir);
+    setCalDate(d);
+    setSelectedSlots([]);
   };
 
-  const handleSelectTerrain = (t: Terrain) => {
-    setSelectedTerrain(t);
-    const hj = parseInt((t.heure_debut_jour || '08:00').split(':')[0]);
-    const hn = parseInt((t.heure_debut_nuit || '18:00').split(':')[0]);
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(hj, 0, 0, 0);
-    const fin = new Date(tomorrow);
-    fin.setHours(hn, 0, 0, 0);
-    setDateDebut(formatDatetimeLocal(tomorrow));
-    setDateFin(formatDatetimeLocal(fin));
-    setStep('datetime');
-  };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const calDayLabel = `${DAY_NAMES[calDate.getDay()]} ${calDate.getDate()} ${MONTH_NAMES[calDate.getMonth()]}`;
 
   const handleSubmit = async () => {
+    if (!range || !selectedTerrain) return;
     setError('');
     setLoading(true);
     try {
       const { data, error } = await supabase.from('reservations').insert({
-        terrain_id: selectedTerrain!.id,
+        terrain_id: selectedTerrain.id,
         client_name: clientName,
         client_phone: clientPhone,
-        date_debut: new Date(dateDebut).toISOString(),
-        date_fin: new Date(dateFin).toISOString(),
-        tarif_total: tarif,
-        montant_ttc: tarif,
+        date_debut: range.debut.toISOString(),
+        date_fin: range.fin.toISOString(),
+        tarif_total: total,
+        montant_ttc: total,
         statut: 'en_attente',
         payment_method: paymentMethod,
         payment_status: 'UNPAID',
-        amount_due: tarif,
+        amount_due: total,
         amount_paid: 0,
         deposit_amount: deposit,
         created_by: null,
@@ -99,8 +112,7 @@ export function PublicBookingPage() {
     setLoading(false);
   };
 
-  const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(n);
-  const pad = (n: number) => String(n).padStart(2, '0');
+  const STEPS: Step[] = ['terrain', 'slots', 'info', 'payment'];
 
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -133,10 +145,9 @@ export function PublicBookingPage() {
         ) : (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
             <div className="flex border-b border-slate-800">
-              {(['terrain', 'datetime', 'info', 'payment'] as Step[]).map((s, i) => {
-                const steps = ['terrain', 'datetime', 'info', 'payment'];
-                const currentIdx = steps.indexOf(step);
-                const idx = steps.indexOf(s);
+              {STEPS.map((s, i) => {
+                const currentIdx = STEPS.indexOf(step);
+                const idx = STEPS.indexOf(s);
                 return (
                   <div key={s} className={`flex-1 py-3 text-center text-xs transition-all ${idx === currentIdx ? 'text-emerald-400 border-b-2 border-emerald-500' : idx < currentIdx ? 'text-slate-400' : 'text-slate-600'}`}>
                     {i + 1}
@@ -145,142 +156,146 @@ export function PublicBookingPage() {
               })}
             </div>
 
-            <div className="p-6">
+            <div className="p-5">
               {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-4 py-3 rounded-xl mb-4">{error}</div>}
 
               {step === 'terrain' && (
                 <div className="space-y-4">
-                  <h2 className="font-semibold text-white">Choisissez un terrain</h2>
+                  <div>
+                    <h2 className="font-semibold text-white mb-1">Choisissez un terrain</h2>
+                    <div className="grid grid-cols-2 gap-2 mb-4">
+                      <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl px-3 py-2 flex items-center gap-2">
+                        <Sun className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                        <div>
+                          <p className="text-[10px] text-slate-500">08h–19h · Lun–Ven</p>
+                          <p className="text-xs font-bold text-amber-400">{fmt(TARIF_JOUR)} F/h</p>
+                        </div>
+                      </div>
+                      <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl px-3 py-2 flex items-center gap-2">
+                        <Moon className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                        <div>
+                          <p className="text-[10px] text-slate-500">19h–08h · WE</p>
+                          <p className="text-xs font-bold text-blue-400">{fmt(TARIF_NUIT)} F/h</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                   <div className="space-y-3">
-                    {terrains.map((t) => {
-                      const hj = parseInt((t.heure_debut_jour || '08:00').split(':')[0]);
-                      const hn = parseInt((t.heure_debut_nuit || '18:00').split(':')[0]);
-                      return (
-                        <button
-                          key={t.id}
-                          onClick={() => handleSelectTerrain(t)}
-                          className={`w-full text-left bg-slate-800 hover:bg-slate-700 border ${selectedTerrain?.id === t.id ? 'border-emerald-500' : 'border-slate-700'} rounded-xl p-4 transition-all`}
-                        >
-                          <p className="font-medium text-slate-200 mb-2">{t.name}</p>
-                          {t.description && <p className="text-xs text-slate-500 mb-3">{t.description}</p>}
-                          <div className="grid grid-cols-2 gap-2">
-                            {t.tarif_jour > 0 && (
-                              <div className="bg-amber-500/10 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-                                <Sun className="w-3 h-3 text-amber-400 flex-shrink-0" />
-                                <div>
-                                  <p className="text-[10px] text-slate-500">{pad(hj)}h–{pad(hn)}h · Sem.</p>
-                                  <p className="text-xs font-bold text-amber-400">{fmt(t.tarif_jour)} F</p>
-                                </div>
-                              </div>
-                            )}
-                            {t.tarif_nuit > 0 && (
-                              <div className="bg-blue-500/10 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
-                                <Moon className="w-3 h-3 text-blue-400 flex-shrink-0" />
-                                <div>
-                                  <p className="text-[10px] text-slate-500">{pad(hn)}h–{pad(hj)}h · WE</p>
-                                  <p className="text-xs font-bold text-blue-400">{fmt(t.tarif_nuit)} F</p>
-                                </div>
-                              </div>
-                            )}
+                    {terrains.map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => { setSelectedTerrain(t); setStep('slots'); }}
+                        className={`w-full text-left bg-slate-800 hover:bg-slate-700 border ${selectedTerrain?.id === t.id ? 'border-emerald-500' : 'border-slate-700'} rounded-xl p-4 transition-all`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-slate-200">{t.name}</p>
+                            {t.description && <p className="text-xs text-slate-500 mt-0.5">{t.description}</p>}
                           </div>
-                        </button>
-                      );
-                    })}
+                          <ChevronRight className="w-4 h-4 text-slate-500" />
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {step === 'datetime' && (
+              {step === 'slots' && (
                 <div className="space-y-4">
-                  <h2 className="font-semibold text-white">Choisissez vos horaires</h2>
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-semibold text-white">Choisissez vos créneaux</h2>
+                    <span className="text-xs text-slate-500">{selectedTerrain?.name}</span>
+                  </div>
 
-                  {selectedTerrain && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="bg-amber-500/5 border border-amber-500/15 rounded-xl px-3 py-2 flex items-center gap-2">
-                        <Sun className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => navigateDate(-1)}
+                      disabled={calDate.getTime() <= today.getTime()}
+                      className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 flex items-center justify-center text-slate-400 hover:text-white transition-all"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="text-sm font-semibold text-white">{calDayLabel}</span>
+                    <button
+                      type="button"
+                      onClick={() => navigateDate(1)}
+                      className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-all"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500">Sélectionnez des créneaux consécutifs (min. 1h)</p>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {allVisibleSlots.map((slot, i) => {
+                      const selected = isSlotSelected(slot);
+                      const isNextDay = slot.startDate.getDate() !== calDate.getDate();
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => toggleSlot(slot)}
+                          className={`
+                            flex items-center justify-between px-3 py-2.5 rounded-xl border text-xs transition-all
+                            ${selected
+                              ? slot.isNight
+                                ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                                : 'bg-amber-500/20 border-amber-500 text-amber-300'
+                              : slot.isNight
+                                ? 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-blue-400/50 hover:bg-blue-500/5'
+                                : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-amber-400/50 hover:bg-amber-500/5'
+                            }
+                          `}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            {slot.isNight
+                              ? <Moon className="w-3 h-3 text-blue-400 flex-shrink-0" />
+                              : <Sun className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                            }
+                            <span className="font-medium">{slot.label}</span>
+                            {isNextDay && (
+                              <span className="text-[9px] text-slate-500 bg-slate-700 px-1 rounded">+1j</span>
+                            )}
+                          </div>
+                          <span className={`font-bold text-[11px] ${slot.isNight ? 'text-blue-400' : 'text-amber-400'}`}>
+                            {fmt(slot.tarif)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {!consecutive && selectedSlots.length > 1 && (
+                    <p className="text-xs text-red-400">Les créneaux doivent être consécutifs.</p>
+                  )}
+
+                  {selectedSlots.length > 0 && range && consecutive && (
+                    <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3">
+                      <div className="flex justify-between items-center">
                         <div>
-                          <p className="text-[10px] text-slate-500">Journée (Lun–Ven)</p>
-                          <p className="text-xs font-bold text-amber-400">{fmt(selectedTerrain.tarif_jour || selectedTerrain.tarif_horaire)} F/h</p>
+                          <p className="text-xs text-slate-400">
+                            {pad(range.debut.getDate())}/{pad(range.debut.getMonth() + 1)} {pad(range.debut.getHours())}h00
+                            {' → '}
+                            {pad(range.fin.getDate())}/{pad(range.fin.getMonth() + 1)} {pad(range.fin.getHours())}h00
+                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5">{selectedSlots.length} heure{selectedSlots.length > 1 ? 's' : ''}</p>
                         </div>
-                      </div>
-                      <div className="bg-blue-500/5 border border-blue-500/15 rounded-xl px-3 py-2 flex items-center gap-2">
-                        <Moon className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
-                        <div>
-                          <p className="text-[10px] text-slate-500">Soir / Weekend</p>
-                          <p className="text-xs font-bold text-blue-400">{fmt(selectedTerrain.tarif_nuit || selectedTerrain.tarif_horaire)} F/h</p>
-                        </div>
+                        <p className="text-lg font-bold text-white">{fmt(total)} <span className="text-xs font-normal text-slate-400">FCFA</span></p>
                       </div>
                     </div>
                   )}
 
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-400">Début</label>
-                      <input
-                        type="datetime-local"
-                        value={dateDebut}
-                        onChange={(e) => setDateDebut(e.target.value)}
-                        min={formatDatetimeLocal(new Date())}
-                        className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-slate-400">Fin</label>
-                      <input
-                        type="datetime-local"
-                        value={dateFin}
-                        onChange={(e) => setDateFin(e.target.value)}
-                        min={dateDebut}
-                        className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-
-                    {tarifResult && tarif > 0 && (
-                      <div className="rounded-xl overflow-hidden border border-slate-700">
-                        <button
-                          type="button"
-                          onClick={() => setShowBreakdown(!showBreakdown)}
-                          className="w-full px-4 py-3 flex items-center justify-between bg-slate-800/60 hover:bg-slate-800 transition-all"
-                        >
-                          <div>
-                            <span className="text-xs text-slate-400 block text-left">Tarif estimé</span>
-                            <span className="font-bold text-lg text-emerald-400">{fmt(tarif)} FCFA</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-500">{tarifResult.slots.length}h</span>
-                            {showBreakdown ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                          </div>
-                        </button>
-
-                        {showBreakdown && (
-                          <div className="bg-slate-800/30 border-t border-slate-700/50 max-h-48 overflow-y-auto">
-                            <div className="grid grid-cols-2 text-[10px] font-medium text-slate-500 px-4 py-1.5 border-b border-slate-700/30">
-                              <span>Créneau</span>
-                              <span className="text-right">Tarif</span>
-                            </div>
-                            {tarifResult.slots.map((slot, i) => (
-                              <div key={i} className="flex items-center justify-between px-4 py-1.5 text-xs border-b border-slate-700/20 last:border-0">
-                                <div className="flex items-center gap-1.5">
-                                  {slot.isNight
-                                    ? <Moon className="w-3 h-3 text-blue-400 flex-shrink-0" />
-                                    : <Sun className="w-3 h-3 text-amber-400 flex-shrink-0" />
-                                  }
-                                  <span className="text-slate-300">{slot.label}</span>
-                                  {slot.isWeekend && <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1 rounded">WE</span>}
-                                </div>
-                                <span className={`font-medium ${slot.isNight ? 'text-blue-400' : 'text-amber-400'}`}>
-                                  {fmt(slot.tarif)} F
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
                   <div className="flex gap-3">
                     <button onClick={() => setStep('terrain')} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm transition-all">Retour</button>
-                    <button onClick={() => setStep('info')} disabled={!dateDebut || !dateFin || tarif <= 0} className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-medium rounded-xl text-sm transition-all">Continuer</button>
+                    <button
+                      onClick={() => setStep('info')}
+                      disabled={selectedSlots.length === 0 || !consecutive}
+                      className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-medium rounded-xl text-sm transition-all"
+                    >
+                      Continuer
+                    </button>
                   </div>
                 </div>
               )}
@@ -288,6 +303,11 @@ export function PublicBookingPage() {
               {step === 'info' && (
                 <div className="space-y-4">
                   <h2 className="font-semibold text-white">Vos informations</h2>
+                  {range && (
+                    <div className="bg-slate-800/50 rounded-xl p-3 text-xs text-slate-400">
+                      {selectedTerrain?.name} · {pad(range.debut.getHours())}h00 → {pad(range.fin.getHours())}h00 · {selectedSlots.length}h · <span className="text-white font-semibold">{fmt(total)} FCFA</span>
+                    </div>
+                  )}
                   <div className="space-y-3">
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-slate-400">Nom complet</label>
@@ -297,15 +317,9 @@ export function PublicBookingPage() {
                       <label className="text-xs font-medium text-slate-400">Téléphone</label>
                       <input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="+221..." className="w-full bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                     </div>
-                    {tarif > 0 && (
-                      <div className="bg-slate-800/50 rounded-xl p-3 flex justify-between text-sm">
-                        <span className="text-slate-400">Montant total</span>
-                        <span className="font-bold text-emerald-400">{fmt(tarif)} FCFA</span>
-                      </div>
-                    )}
                   </div>
                   <div className="flex gap-3">
-                    <button onClick={() => setStep('datetime')} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm transition-all">Retour</button>
+                    <button onClick={() => setStep('slots')} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm transition-all">Retour</button>
                     <button onClick={() => setStep('payment')} disabled={!clientName || !clientPhone} className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white font-medium rounded-xl text-sm transition-all">Continuer</button>
                   </div>
                 </div>
@@ -331,32 +345,30 @@ export function PublicBookingPage() {
                     ))}
                   </div>
 
-                  <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-400">Terrain</span>
-                      <span className="text-slate-200">{selectedTerrain?.name}</span>
-                    </div>
-                    {tarifResult && (
-                      <div className="flex justify-between text-xs text-slate-500">
-                        <span>
-                          {tarifResult.breakdown.slotJour > 0 && `${tarifResult.breakdown.slotJour}h jour`}
-                          {tarifResult.breakdown.slotJour > 0 && tarifResult.breakdown.slotNuit > 0 && ' + '}
-                          {tarifResult.breakdown.slotNuit > 0 && `${tarifResult.breakdown.slotNuit}h nuit/WE`}
-                        </span>
-                        <span>{tarifResult.slots.length}h total</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-sm border-t border-slate-700 pt-2">
-                      <span className="text-slate-400">Montant total</span>
-                      <span className="font-semibold text-white">{fmt(tarif)} FCFA</span>
-                    </div>
-                    {paymentMethod !== 'ON_SITE' && (
+                  {range && (
+                    <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
                       <div className="flex justify-between text-sm">
-                        <span className="text-slate-400">Acompte à payer</span>
-                        <span className="font-bold text-emerald-400">{fmt(deposit)} FCFA</span>
+                        <span className="text-slate-400">Terrain</span>
+                        <span className="text-slate-200">{selectedTerrain?.name}</span>
                       </div>
-                    )}
-                  </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-400">Horaires</span>
+                        <span className="text-slate-300">
+                          {pad(range.debut.getDate())}/{pad(range.debut.getMonth() + 1)} {pad(range.debut.getHours())}h → {pad(range.fin.getDate())}/{pad(range.fin.getMonth() + 1)} {pad(range.fin.getHours())}h
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm border-t border-slate-700 pt-2">
+                        <span className="text-slate-400">Total ({selectedSlots.length}h)</span>
+                        <span className="font-bold text-white">{fmt(total)} FCFA</span>
+                      </div>
+                      {paymentMethod !== 'ON_SITE' && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-400">Acompte à payer</span>
+                          <span className="font-bold text-emerald-400">{fmt(deposit)} FCFA</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="flex gap-3">
                     <button onClick={() => setStep('info')} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm transition-all">Retour</button>
