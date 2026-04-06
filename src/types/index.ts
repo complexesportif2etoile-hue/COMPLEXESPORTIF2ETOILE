@@ -13,6 +13,10 @@ export interface Terrain {
   name: string;
   description: string;
   tarif_horaire: number;
+  tarif_jour: number;
+  tarif_nuit: number;
+  heure_debut_jour: string;
+  heure_debut_nuit: string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
