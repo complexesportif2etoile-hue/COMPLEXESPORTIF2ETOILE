@@ -13,9 +13,9 @@ type Step = 'terrain' | 'slots' | 'info' | 'payment' | 'confirm';
 const MONTH_NAMES = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
 const DAY_NAMES = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
 
-function isSlotBlocked(slot: SlotHour, now: Date, bookedRanges: { debut: Date; fin: Date }[]): boolean {
-  if (slot.startDate < now) return true;
-  return bookedRanges.some(r => slot.startDate < r.fin && slot.endDate > r.debut);
+function isSlotBlocked(slot: SlotHour, nowMs: number, bookedRanges: { debut: Date; fin: Date }[]): boolean {
+  if (slot.startDate.getTime() < nowMs) return true;
+  return bookedRanges.some(r => slot.startDate.getTime() < r.fin.getTime() && slot.endDate.getTime() > r.debut.getTime());
 }
 
 export function PublicBookingPage() {
@@ -32,7 +32,12 @@ export function PublicBookingPage() {
   const [bookingCode, setBookingCode] = useState('');
   const [error, setError] = useState('');
   const [bookedRanges, setBookedRanges] = useState<{ debut: Date; fin: Date }[]>([]);
-  const [now] = useState<Date>(() => new Date());
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     supabase.from('terrains').select('*').eq('is_active', true).then(({ data }) => {
@@ -252,7 +257,7 @@ export function PublicBookingPage() {
                   <div className="grid grid-cols-2 gap-1.5">
                     {allVisibleSlots.map((slot, i) => {
                       const selected = isSlotSelected(slot);
-                      const blocked = isSlotBlocked(slot, now, bookedRanges);
+                      const blocked = isSlotBlocked(slot, nowMs, bookedRanges);
                       const isNextDay = slot.startDate.getDate() !== calDate.getDate();
                       return (
                         <button
