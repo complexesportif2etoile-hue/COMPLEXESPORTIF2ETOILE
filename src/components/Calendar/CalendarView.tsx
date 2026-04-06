@@ -6,152 +6,231 @@ import { format, addDays, startOfWeek, isSameDay, getDaysInMonth, addMonths, par
 import { ReservationModal } from './ReservationModal';
 import { Reservation } from '../../types';
 
-type ViewMode = 'week' | 'month';
+const MONTH_NAMES = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+];
 
-const HOURS = Array.from({ length: 18 }, (_, i) => i + 6);
+const DAY_HEADERS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 
-const STATUS_COLORS: Record<string, string> = {
-  réservé: 'bg-blue-500/80 border-blue-400 text-white',
-  check_in: 'bg-emerald-500/80 border-emerald-400 text-white',
-  en_attente: 'bg-amber-500/80 border-amber-400 text-white',
-  terminé: 'bg-slate-600/80 border-slate-500 text-slate-300',
-  annulé: 'bg-red-500/20 border-red-500/40 text-red-400',
-  bloqué: 'bg-slate-800/80 border-slate-700 text-slate-400',
-  check_out: 'bg-teal-500/80 border-teal-400 text-white',
+const STATUS_DOT: Record<string, string> = {
+  réservé: 'bg-emerald-500',
+  check_in: 'bg-amber-400',
+  en_attente: 'bg-amber-400',
+  terminé: 'bg-teal-400',
+  check_out: 'bg-teal-400',
+  annulé: 'bg-red-400',
+  bloqué: 'bg-slate-500',
 };
 
 export function CalendarView() {
   const { reservations, terrains } = useData();
   const { hasPermission } = useAuth();
-  const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [newResSlot, setNewResSlot] = useState<{ date: Date; terrainId: string } | null>(null);
-  const [selectedTerrainFilter, setSelectedTerrainFilter] = useState<string>('all');
+  const [newResSlot, setNewResSlot] = useState<{ date: Date; terrainId?: string } | null>(null);
+  const [showDayDetail, setShowDayDetail] = useState(false);
 
   const canManage = hasPermission('manage_reservations');
 
-  const weekStart = useMemo(() => startOfWeek(currentDate), [currentDate]);
-  const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const monthDays = useMemo(() => getDaysInMonth(currentDate), [currentDate]);
 
-  const filteredTerrains = useMemo(() =>
-    selectedTerrainFilter === 'all' ? terrains : terrains.filter((t) => t.id === selectedTerrainFilter),
-    [terrains, selectedTerrainFilter]
-  );
+  const getReservationsForDay = (date: Date) =>
+    reservations.filter((r) => isSameDay(new Date(r.date_debut), date));
 
-  const getReservationsForSlot = (date: Date, terrainId: string) => {
-    return reservations.filter((r) => {
-      if (r.terrain_id !== terrainId) return false;
-      const start = new Date(r.date_debut);
-      const end = new Date(r.date_fin);
-      return isSameDay(start, date) && r.statut !== 'annulé';
-    });
+  const navigate = (dir: number) => setCurrentDate(addMonths(currentDate, dir));
+
+  const handleDayClick = (date: Date) => {
+    setSelectedDate(date);
+    setShowDayDetail(true);
   };
 
-  const getReservationsForDay = (date: Date) => {
-    return reservations.filter((r) => {
-      const start = new Date(r.date_debut);
-      return isSameDay(start, date) && r.statut !== 'annulé';
-    });
-  };
-
-  const navigate = (direction: number) => {
-    if (viewMode === 'week') {
-      setCurrentDate(addDays(currentDate, direction * 7));
-    } else {
-      setCurrentDate(addMonths(currentDate, direction));
-    }
-  };
-
-  const handleSlotClick = (date: Date, hour: number, terrainId: string) => {
-    if (!canManage) return;
-    const slotDate = new Date(date);
-    slotDate.setHours(hour, 0, 0, 0);
-    setNewResSlot({ date: slotDate, terrainId });
+  const handleNewReservation = () => {
+    setNewResSlot({ date: selectedDate || new Date() });
     setSelectedReservation(null);
     setShowModal(true);
+    setShowDayDetail(false);
   };
 
-  const title = viewMode === 'week'
-    ? `${format(weekDays[0], 'dd/MM')} – ${format(weekDays[6], 'dd/MM/yyyy')}`
-    : format(currentDate, 'MM/yyyy');
+  const startPadding = monthDays.length > 0 ? monthDays[0].getDay() : 0;
+
+  const monthLabel = `${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
+  const today = new Date();
+
+  const selectedDayReservations = selectedDate ? getReservationsForDay(selectedDate) : [];
+
+  const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(n);
 
   return (
-    <div className="space-y-4 h-full flex flex-col">
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between flex-shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Calendrier</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Gérez vos réservations de terrains</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={selectedTerrainFilter}
-            onChange={(e) => setSelectedTerrainFilter(e.target.value)}
-            className="bg-slate-800 border border-slate-700 text-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="all">Tous les terrains</option>
-            {terrains.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-          <div className="flex bg-slate-800 rounded-xl border border-slate-700 p-1 gap-1">
-            {(['week', 'month'] as const).map((mode) => (
+    <div className="space-y-4 pb-6">
+      <h1 className="text-2xl font-bold text-white">Calendrier</h1>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+        <div className="px-4 pt-4 pb-2">
+          <h2 className="text-lg font-bold text-white mb-3">{monthLabel}</h2>
+
+          <div className="flex items-center gap-3 mb-4">
+            {canManage && (
               <button
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${viewMode === mode ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                onClick={() => { setNewResSlot({ date: selectedDate || new Date() }); setSelectedReservation(null); setShowModal(true); }}
+                className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.97] text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-emerald-500/20"
               >
-                {mode === 'week' ? 'Semaine' : 'Mois'}
+                <Plus className="w-4 h-4" />
+                Reserver
               </button>
+            )}
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={() => navigate(-1)}
+                className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-all"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => navigate(1)}
+                className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-400 hover:text-white transition-all"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-7 mb-1">
+            {DAY_HEADERS.map((d, i) => (
+              <div key={i} className="text-center py-1">
+                <span className="text-xs font-medium text-slate-500">{d}</span>
+              </div>
             ))}
           </div>
-          {canManage && (
-            <button
-              onClick={() => { setNewResSlot(null); setSelectedReservation(null); setShowModal(true); }}
-              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              Réserver
-            </button>
-          )}
+
+          <div className="grid grid-cols-7">
+            {Array.from({ length: startPadding }, (_, i) => (
+              <div key={`pad-${i}`} className="aspect-square" />
+            ))}
+
+            {monthDays.map((day, i) => {
+              const resos = getReservationsForDay(day);
+              const isToday = isSameDay(day, today);
+              const isSelected = selectedDate ? isSameDay(day, selectedDate) : false;
+              const hasResos = resos.length > 0;
+              const count = resos.length;
+
+              const statusGroups: Record<string, number> = {};
+              resos.forEach((r) => {
+                const key = r.statut;
+                statusGroups[key] = (statusGroups[key] || 0) + 1;
+              });
+
+              return (
+                <button
+                  key={i}
+                  onClick={() => handleDayClick(day)}
+                  className={`
+                    relative flex flex-col items-center py-1.5 rounded-xl transition-all
+                    ${isSelected && !isToday ? 'bg-slate-700/60' : ''}
+                    ${isToday ? 'bg-emerald-500/10' : 'hover:bg-slate-800/50'}
+                  `}
+                >
+                  <span className={`
+                    text-sm font-semibold w-7 h-7 flex items-center justify-center rounded-full transition-all
+                    ${isToday ? 'bg-emerald-500 text-white' : isSelected ? 'text-emerald-400' : 'text-slate-300'}
+                  `}>
+                    {day.getDate()}
+                  </span>
+                  {hasResos && (
+                    <span className="text-xs text-slate-400 font-medium leading-none mt-0.5">
+                      {count}
+                    </span>
+                  )}
+                  {hasResos && (
+                    <div className="w-1.5 h-1.5 rounded-full mt-0.5" style={{ backgroundColor: getDominantColor(resos) }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="px-4 py-3 border-t border-slate-800">
+          <p className="text-sm font-semibold text-white mb-2">Legende</p>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+            <LegendItem color="bg-emerald-500" label="Reserve" />
+            <LegendItem color="bg-teal-400" label="Termine" />
+            <LegendItem color="bg-amber-400" label="En cours" />
+            <LegendItem color="bg-red-400" label="Annule" />
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-3 flex-shrink-0">
-        <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all">
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-        <span className="text-sm font-medium text-slate-200 min-w-32 text-center">{title}</span>
-        <button onClick={() => navigate(1)} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all">
-          <ChevronRight className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => setCurrentDate(new Date())}
-          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs transition-all"
-        >
-          Aujourd'hui
-        </button>
-      </div>
+      {showDayDetail && selectedDate && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-white text-sm">
+                {MONTH_NAMES[selectedDate.getMonth()].slice(0, 3)} {selectedDate.getDate()}, {selectedDate.getFullYear()}
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {selectedDayReservations.length} réservation{selectedDayReservations.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+            {canManage && (
+              <button
+                onClick={handleNewReservation}
+                className="flex items-center gap-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-xl text-xs font-medium transition-all border border-emerald-500/20"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Ajouter
+              </button>
+            )}
+          </div>
 
-      {viewMode === 'week' ? (
-        <WeekView
-          weekDays={weekDays}
-          terrains={filteredTerrains}
-          hours={HOURS}
-          onSlotClick={handleSlotClick}
-          onResClick={(r) => { setSelectedReservation(r); setShowModal(true); }}
-          getReservations={getReservationsForSlot}
-          canManage={canManage}
-        />
-      ) : (
-        <MonthView
-          days={monthDays}
-          currentDate={currentDate}
-          getReservations={getReservationsForDay}
-          onDayClick={(date) => { setCurrentDate(date); setViewMode('week'); }}
-        />
+          {selectedDayReservations.length === 0 ? (
+            <div className="px-4 py-8 text-center text-slate-500 text-sm">
+              Aucune réservation ce jour
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-800/60">
+              {selectedDayReservations.map((r) => {
+                const start = new Date(r.date_debut);
+                const end = new Date(r.date_fin);
+                const pad = (n: number) => String(n).padStart(2, '0');
+                const timeStr = `${pad(start.getHours())}:${pad(start.getMinutes())} – ${pad(end.getHours())}:${pad(end.getMinutes())}`;
+
+                return (
+                  <button
+                    key={r.id}
+                    onClick={() => { setSelectedReservation(r); setShowModal(true); setShowDayDetail(false); }}
+                    className="w-full px-4 py-3.5 flex items-center gap-3 hover:bg-slate-800/30 transition-colors text-left"
+                  >
+                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${STATUS_DOT[r.statut] || 'bg-slate-500'}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-100 truncate">{r.client_name}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {r.terrain?.name || ''} · {timeStr}
+                      </p>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-bold text-white">{fmt(r.amount_due)}</p>
+                      <p className={`text-xs mt-0.5 ${
+                        r.statut === 'réservé' ? 'text-emerald-400' :
+                        r.statut === 'check_in' ? 'text-amber-400' :
+                        r.statut === 'terminé' || r.statut === 'check_out' ? 'text-teal-400' :
+                        r.statut === 'annulé' ? 'text-red-400' : 'text-slate-500'
+                      }`}>
+                        {r.statut === 'réservé' ? 'Réservé' :
+                          r.statut === 'check_in' ? 'En cours' :
+                          r.statut === 'terminé' || r.statut === 'check_out' ? 'Terminé' :
+                          r.statut === 'annulé' ? 'Annulé' : r.statut}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
 
       {showModal && (
@@ -166,122 +245,29 @@ export function CalendarView() {
   );
 }
 
-function WeekView({ weekDays, terrains, hours, onSlotClick, onResClick, getReservations, canManage }: {
-  weekDays: Date[];
-  terrains: { id: string; name: string }[];
-  hours: number[];
-  onSlotClick: (date: Date, hour: number, terrainId: string) => void;
-  onResClick: (r: Reservation) => void;
-  getReservations: (date: Date, terrainId: string) => Reservation[];
-  canManage: boolean;
-}) {
-  const DAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-  const today = new Date();
-
-  return (
-    <div className="flex-1 overflow-auto bg-slate-900 rounded-2xl border border-slate-800">
-      <div className="min-w-[700px]">
-        <div className="grid sticky top-0 z-10 bg-slate-900 border-b border-slate-800" style={{ gridTemplateColumns: `56px repeat(${weekDays.length}, 1fr)` }}>
-          <div className="border-r border-slate-800" />
-          {weekDays.map((day, i) => (
-            <div key={i} className={`p-2 text-center border-r border-slate-800 last:border-r-0 ${isSameDay(day, today) ? 'bg-emerald-500/5' : ''}`}>
-              <p className="text-xs text-slate-500">{DAY_LABELS[i]}</p>
-              <p className={`text-sm font-semibold ${isSameDay(day, today) ? 'text-emerald-400' : 'text-slate-200'}`}>
-                {format(day, 'dd')}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        {terrains.map((terrain) => (
-          <div key={terrain.id} className="border-b border-slate-800 last:border-b-0">
-            <div className="sticky left-0 bg-slate-900/80 px-2 py-1.5 border-b border-slate-800/50">
-              <p className="text-xs font-medium text-emerald-400 truncate">{terrain.name}</p>
-            </div>
-            {hours.map((hour) => (
-              <div key={hour} className="grid border-b border-slate-800/30 last:border-b-0" style={{ gridTemplateColumns: `56px repeat(${weekDays.length}, 1fr)` }}>
-                <div className="border-r border-slate-800 flex items-center justify-end pr-2">
-                  <span className="text-xs text-slate-600">{String(hour).padStart(2, '0')}h</span>
-                </div>
-                {weekDays.map((day, i) => {
-                  const resos = getReservations(day, terrain.id).filter((r) => {
-                    const h = new Date(r.date_debut).getHours();
-                    return h === hour;
-                  });
-                  return (
-                    <div
-                      key={i}
-                      onClick={() => onSlotClick(day, hour, terrain.id)}
-                      className={`border-r border-slate-800/50 last:border-r-0 min-h-[40px] p-0.5 ${canManage ? 'cursor-pointer hover:bg-slate-800/30' : ''} ${isSameDay(day, new Date()) ? 'bg-emerald-500/3' : ''}`}
-                    >
-                      {resos.map((r) => (
-                        <div
-                          key={r.id}
-                          onClick={(e) => { e.stopPropagation(); onResClick(r); }}
-                          className={`text-xs rounded p-1 mb-0.5 border cursor-pointer hover:opacity-90 transition-opacity truncate ${STATUS_COLORS[r.statut] || STATUS_COLORS.réservé}`}
-                        >
-                          {r.client_name}
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function getDominantColor(reservations: Reservation[]): string {
+  const priority = ['check_in', 'en_attente', 'réservé', 'terminé', 'check_out', 'annulé'];
+  for (const status of priority) {
+    if (reservations.some((r) => r.statut === status)) {
+      const colors: Record<string, string> = {
+        réservé: '#10b981',
+        check_in: '#fbbf24',
+        en_attente: '#fbbf24',
+        terminé: '#2dd4bf',
+        check_out: '#2dd4bf',
+        annulé: '#f87171',
+      };
+      return colors[status] || '#64748b';
+    }
+  }
+  return '#64748b';
 }
 
-function MonthView({ days, currentDate, getReservations, onDayClick }: {
-  days: Date[];
-  currentDate: Date;
-  getReservations: (date: Date) => Reservation[];
-  onDayClick: (date: Date) => void;
-}) {
-  const today = new Date();
-  const startPad = (days[0].getDay() + 6) % 7;
-  const DAY_HEADERS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-
+function LegendItem({ color, label }: { color: string; label: string }) {
   return (
-    <div className="flex-1 bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
-      <div className="grid grid-cols-7 border-b border-slate-800">
-        {DAY_HEADERS.map((d) => (
-          <div key={d} className="py-2 text-center text-xs font-medium text-slate-500">{d}</div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7">
-        {Array.from({ length: startPad }, (_, i) => (
-          <div key={`pad-${i}`} className="border-b border-r border-slate-800/50 min-h-[80px]" />
-        ))}
-        {days.map((day, i) => {
-          const resos = getReservations(day);
-          const isCurrentMonth = day.getMonth() === currentDate.getMonth();
-          return (
-            <div
-              key={i}
-              onClick={() => onDayClick(day)}
-              className={`border-b border-r border-slate-800/50 min-h-[80px] p-1.5 cursor-pointer hover:bg-slate-800/40 transition-colors last:border-r-0 ${isSameDay(day, today) ? 'bg-emerald-500/5' : ''}`}
-            >
-              <span className={`text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full ${isSameDay(day, today) ? 'bg-emerald-500 text-white' : isCurrentMonth ? 'text-slate-300' : 'text-slate-600'}`}>
-                {format(day, 'dd')}
-              </span>
-              <div className="mt-1 space-y-0.5">
-                {resos.slice(0, 3).map((r) => (
-                  <div key={r.id} className={`text-xs px-1 rounded truncate ${STATUS_COLORS[r.statut] || STATUS_COLORS.réservé}`}>
-                    {r.client_name}
-                  </div>
-                ))}
-                {resos.length > 3 && (
-                  <div className="text-xs text-slate-500 pl-1">+{resos.length - 3}</div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div className="flex items-center gap-2">
+      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${color}`} />
+      <span className="text-xs text-slate-300">{label}</span>
     </div>
   );
 }
