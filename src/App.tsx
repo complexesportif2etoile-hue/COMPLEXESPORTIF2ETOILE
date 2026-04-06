@@ -16,6 +16,7 @@ import { RsvpPage } from './components/PublicBooking/RsvpPage';
 import { ComplexeSportif2eEtoilePage } from './components/PublicBooking/ComplexeSportif2eEtoilePage';
 import { PaymentsPage } from './components/Payments/PaymentsPage';
 import { BackupRestorePage } from './components/Backup/BackupRestorePage';
+import { DepensesPage } from './components/Depenses/DepensesPage';
 
 const getPublicRoute = (): { type: 'booking' | 'rsvp' | 'complexe2etoile' | null; code?: string } => {
   const path = window.location.pathname;
@@ -101,6 +102,9 @@ function AppViews({ currentView, onViewChange }: { currentView: string; onViewCh
       </div>
       <div className={currentView === 'payments' ? '' : 'hidden'}>
         <PaymentsPage />
+      </div>
+      <div className={currentView === 'depenses' ? '' : 'hidden'}>
+        <DepensesPage />
       </div>
       <div className={currentView === 'settings' ? '' : 'hidden'}>
         <Settings />

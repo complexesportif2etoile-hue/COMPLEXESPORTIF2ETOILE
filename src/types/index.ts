@@ -134,6 +134,28 @@ export interface DepositSettings {
   updated_at: string;
 }
 
+export type DepenseCategorie =
+  | 'salaires'
+  | 'entretien'
+  | 'electricite'
+  | 'eau'
+  | 'loyer'
+  | 'equipement'
+  | 'fournitures'
+  | 'autre';
+
+export interface Depense {
+  id: string;
+  libelle: string;
+  montant: number;
+  categorie: DepenseCategorie;
+  date_depense: string;
+  notes: string;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface RolePermission {
   id: string;
   role: 'manager' | 'receptionist' | 'user';

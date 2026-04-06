@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useData } from '../../contexts/DataContext';
-import { Calendar, Users, CreditCard, TrendingUp, Clock, CheckCircle, AlertCircle, MapPin } from 'lucide-react';
+import { Calendar, TrendingUp, TrendingDown, Clock, AlertCircle, MapPin } from 'lucide-react';
 import { format, isToday, parseISO } from '../utils/dateUtils';
 
 interface DashboardProps {
@@ -8,7 +8,7 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
-  const { reservations, terrains, clients, encaissements } = useData();
+  const { reservations, terrains, clients, encaissements, depenses } = useData();
 
   const stats = useMemo(() => {
     const today = new Date();
@@ -31,12 +31,19 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
     const monthRevenue = thisMonthEnc.reduce((sum, e) => sum + e.montant_total, 0);
 
+    const thisMonthDep = depenses.filter((d) => {
+      const parts = d.date_depense.slice(0, 7).split('-');
+      return parseInt(parts[1]) - 1 === today.getMonth() && parseInt(parts[0]) === today.getFullYear();
+    });
+    const monthDepenses = thisMonthDep.reduce((sum, d) => sum + d.montant, 0);
+    const monthBenefice = monthRevenue - monthDepenses;
+
     const pendingPayment = reservations.filter((r) =>
       r.payment_status === 'UNPAID' && ['réservé', 'check_in'].includes(r.statut)
     );
 
-    return { todayRes, activeRes, monthRevenue, pendingPayment, clients };
-  }, [reservations, clients, encaissements]);
+    return { todayRes, activeRes, monthRevenue, monthDepenses, monthBenefice, pendingPayment, clients };
+  }, [reservations, clients, encaissements, depenses]);
 
   const upcomingReservations = useMemo(() => {
     const now = new Date();
@@ -89,7 +96,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         />
         <StatCard
           icon={TrendingUp}
-          label="Revenus ce mois"
+          label="Encaissements ce mois"
           value={formatCurrency(stats.monthRevenue)}
           color="cyan"
           onClick={() => onNavigate('rapports')}
@@ -100,6 +107,23 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           value={stats.pendingPayment.length}
           color="amber"
           onClick={() => onNavigate('payments')}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <StatCard
+          icon={TrendingDown}
+          label="Dépenses ce mois"
+          value={formatCurrency(stats.monthDepenses)}
+          color="red"
+          onClick={() => onNavigate('depenses')}
+        />
+        <StatCard
+          icon={TrendingUp}
+          label="Bénéfice net ce mois"
+          value={formatCurrency(stats.monthBenefice)}
+          color={stats.monthBenefice >= 0 ? 'emerald' : 'red'}
+          onClick={() => onNavigate('rapports')}
         />
       </div>
 
@@ -189,7 +213,7 @@ interface StatCardProps {
   icon: React.ElementType;
   label: string;
   value: string | number;
-  color: 'emerald' | 'blue' | 'cyan' | 'amber';
+  color: 'emerald' | 'blue' | 'cyan' | 'amber' | 'red';
   onClick?: () => void;
 }
 
@@ -199,6 +223,7 @@ function StatCard({ icon: Icon, label, value, color, onClick }: StatCardProps) {
     blue: 'bg-blue-500/10 text-blue-400',
     cyan: 'bg-cyan-500/10 text-cyan-400',
     amber: 'bg-amber-500/10 text-amber-400',
+    red: 'bg-red-500/10 text-red-400',
   };
 
   return (

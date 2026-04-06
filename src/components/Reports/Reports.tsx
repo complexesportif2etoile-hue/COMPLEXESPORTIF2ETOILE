@@ -1,12 +1,12 @@
 import { useState, useMemo } from 'react';
 import { useData } from '../../contexts/DataContext';
-import { TrendingUp, Calendar, CreditCard, Users, BarChart2, Download } from 'lucide-react';
+import { TrendingUp, TrendingDown, Calendar, CreditCard, BarChart2 } from 'lucide-react';
 import { format, parseISO } from '../utils/dateUtils';
 
 type Period = 'today' | 'week' | 'month' | 'year';
 
 export function Reports() {
-  const { reservations, encaissements, terrains, clients } = useData();
+  const { reservations, encaissements, terrains, clients, depenses } = useData();
   const [period, setPeriod] = useState<Period>('month');
 
   const periodRange = useMemo(() => {
@@ -40,7 +40,15 @@ export function Reports() {
       return d >= start && d <= end;
     });
 
+    const periodDep = depenses.filter((d) => {
+      const dep = new Date(d.date_depense);
+      return dep >= start && dep <= end;
+    });
+
     const totalRevenue = periodEnc.reduce((s, e) => s + e.montant_total, 0);
+    const totalDepenses = periodDep.reduce((s, d) => s + d.montant, 0);
+    const beneficeNet = totalRevenue - totalDepenses;
+
     const completed = periodRes.filter((r) => ['terminé', 'check_out'].includes(r.statut)).length;
     const cancelled = periodRes.filter((r) => r.statut === 'annulé').length;
     const unpaid = periodRes.filter((r) => r.payment_status === 'UNPAID' && !['annulé'].includes(r.statut)).length;
@@ -58,8 +66,13 @@ export function Reports() {
       payMethods[e.mode_paiement] = (payMethods[e.mode_paiement] || 0) + e.montant_total;
     });
 
-    return { periodRes, totalRevenue, completed, cancelled, unpaid, byTerrain, payMethods };
-  }, [reservations, encaissements, terrains, periodRange]);
+    const depByCategorie: Record<string, number> = {};
+    periodDep.forEach((d) => {
+      depByCategorie[d.categorie] = (depByCategorie[d.categorie] || 0) + d.montant;
+    });
+
+    return { periodRes, totalRevenue, totalDepenses, beneficeNet, completed, cancelled, unpaid, byTerrain, payMethods, depByCategorie };
+  }, [reservations, encaissements, depenses, terrains, periodRange]);
 
   const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(n);
 
@@ -67,6 +80,11 @@ export function Reports() {
 
   const PAY_METHOD_LABELS: Record<string, string> = {
     especes: 'Espèces', wave: 'Wave', orange_money: 'Orange Money', mixte: 'Mixte', autre: 'Autre',
+  };
+
+  const DEP_CAT_LABELS: Record<string, string> = {
+    salaires: 'Salaires', entretien: 'Entretien', electricite: 'Électricité',
+    eau: 'Eau', loyer: 'Loyer', equipement: 'Équipement', fournitures: 'Fournitures', autre: 'Autre',
   };
 
   return (
@@ -90,13 +108,55 @@ export function Reports() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Revenus" value={`${fmt(stats.totalRevenue)} FCFA`} icon={TrendingUp} color="emerald" />
+        <StatCard label="Encaissements" value={`${fmt(stats.totalRevenue)} FCFA`} icon={TrendingUp} color="emerald" />
+        <StatCard label="Dépenses" value={`${fmt(stats.totalDepenses)} FCFA`} icon={TrendingDown} color="red" />
         <StatCard label="Réservations" value={stats.periodRes.length} icon={Calendar} color="blue" />
-        <StatCard label="Terminées" value={stats.completed} icon={BarChart2} color="cyan" />
         <StatCard label="Impayées" value={stats.unpaid} icon={CreditCard} color="amber" />
       </div>
 
+      <div className={`rounded-2xl border p-5 ${stats.beneficeNet >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-slate-400 mb-1">Bénéfice net ({PERIOD_LABELS[period]})</p>
+            <p className={`text-3xl font-bold ${stats.beneficeNet >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {stats.beneficeNet >= 0 ? '+' : ''}{fmt(stats.beneficeNet)} FCFA
+            </p>
+          </div>
+          <div className={`text-xs px-3 py-1.5 rounded-full border font-medium ${stats.beneficeNet >= 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+            {stats.totalRevenue > 0 ? `${Math.round((stats.beneficeNet / stats.totalRevenue) * 100)}% de marge` : 'Aucun encaissement'}
+          </div>
+        </div>
+        <div className="mt-3 flex gap-6 text-xs text-slate-500">
+          <span>Encaissements : <span className="text-emerald-400 font-medium">{fmt(stats.totalRevenue)} FCFA</span></span>
+          <span>Dépenses : <span className="text-red-400 font-medium">{fmt(stats.totalDepenses)} FCFA</span></span>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <h2 className="font-semibold text-white mb-4 flex items-center gap-2">
+            <TrendingDown className="w-4 h-4 text-red-400" />
+            Dépenses par catégorie
+          </h2>
+          <div className="space-y-3">
+            {Object.entries(stats.depByCategorie).sort((a, b) => b[1] - a[1]).map(([cat, amount]) => {
+              const pct = stats.totalDepenses > 0 ? Math.round((amount / stats.totalDepenses) * 100) : 0;
+              return (
+                <div key={cat}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-slate-300">{DEP_CAT_LABELS[cat] || cat}</span>
+                    <span className="text-slate-400">{pct}% — <span className="text-red-400 font-medium">{fmt(amount)} FCFA</span></span>
+                  </div>
+                  <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-red-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+            {Object.keys(stats.depByCategorie).length === 0 && <p className="text-slate-500 text-sm">Aucune dépense</p>}
+          </div>
+        </div>
+
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
           <h2 className="font-semibold text-white mb-4">Revenus par terrain</h2>
           <div className="space-y-3">
@@ -191,6 +251,7 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: s
     blue: 'bg-blue-500/10 text-blue-400',
     cyan: 'bg-cyan-500/10 text-cyan-400',
     amber: 'bg-amber-500/10 text-amber-400',
+    red: 'bg-red-500/10 text-red-400',
   };
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">

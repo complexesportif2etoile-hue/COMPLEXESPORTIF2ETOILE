@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   LayoutDashboard, Calendar, MapPin, Users, ClipboardList,
   BarChart2, Settings, CreditCard, Database, Menu, X, LogOut,
-  Shield, ChevronRight
+  Shield, ChevronRight, TrendingDown
 } from 'lucide-react';
 
 interface NavItem {
@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'clients', label: 'Clients', icon: Users, permission: 'view_clients' },
   { id: 'reservations', label: 'Réservations', icon: ClipboardList, permission: 'view_reservations' },
   { id: 'payments', label: 'Paiements', icon: CreditCard, permission: 'view_payments' },
+  { id: 'depenses', label: 'Dépenses', icon: TrendingDown, permission: 'view_rapports' },
   { id: 'rapports', label: 'Rapports', icon: BarChart2, permission: 'view_rapports' },
   { id: 'users', label: 'Utilisateurs', icon: Shield, adminOnly: true },
   { id: 'settings', label: 'Paramètres', icon: Settings, adminOnly: true },
