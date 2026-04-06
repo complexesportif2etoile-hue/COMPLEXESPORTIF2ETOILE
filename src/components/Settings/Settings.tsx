@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Loader2, Settings as SettingsIcon, Building, CreditCard, Shield } from 'lucide-react';
+import { Save, Loader2, Building, CreditCard, Shield, Link, Copy, Check, ExternalLink } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useData } from '../../contexts/DataContext';
 import { CompanySettings, DepositSettings, RolePermission } from '../../types';
@@ -29,6 +29,15 @@ const ROLE_LABELS: Record<string, string> = { manager: 'Manager', receptionist: 
 export function Settings() {
   const { companySettings, depositSettings, rolePermissions, refreshCompanySettings, refreshDepositSettings, refreshRolePermissions } = useData();
   const [tab, setTab] = useState<Tab>('company');
+  const [copied, setCopied] = useState(false);
+
+  const bookingUrl = `${window.location.origin}/r/complexe-sportif-2e-etoile`;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(bookingUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
   const [company, setCompany] = useState<Partial<CompanySettings>>({});
   const [deposit, setDeposit] = useState<Partial<DepositSettings>>({});
   const [perms, setPerms] = useState<RolePermission[]>([]);
@@ -110,6 +119,40 @@ export function Settings() {
       </div>
 
       {tab === 'company' && (
+        <>
+        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-2xl p-4 max-w-2xl">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+              <Link className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-white text-sm">Lien de réservation en ligne</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Partagez ce lien à vos clients pour qu'ils réservent directement</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-700/60 rounded-xl px-3 py-2.5 mb-3">
+            <span className="flex-1 text-xs text-slate-300 truncate font-mono">{bookingUrl}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopy}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'}`}
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? 'Copié !' : 'Copier'}
+            </button>
+            <a
+              href={bookingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Ouvrir
+            </a>
+          </div>
+        </div>
+
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 max-w-2xl">
           <h2 className="font-semibold text-white">Informations de l'entreprise</h2>
           {[
@@ -146,6 +189,7 @@ export function Settings() {
             {saved ? 'Sauvegardé !' : 'Sauvegarder'}
           </button>
         </div>
+        </>
       )}
 
       {tab === 'payments' && (
