@@ -32,12 +32,14 @@ export function PublicBookingPage() {
   const [bookingCode, setBookingCode] = useState('');
   const [error, setError] = useState('');
   const [bookedRanges, setBookedRanges] = useState<{ debut: Date; fin: Date }[]>([]);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    const interval = setInterval(() => setNowMs(Date.now()), 60000);
+    const interval = setInterval(() => setTick(t => t + 1), 60000);
     return () => clearInterval(interval);
   }, []);
+
+  const nowMs = Date.now() + tick * 0;
 
   useEffect(() => {
     supabase.from('terrains').select('*').eq('is_active', true).then(({ data }) => {
@@ -48,19 +50,23 @@ export function PublicBookingPage() {
     });
   }, []);
 
-  useEffect(() => {
-    if (!selectedTerrain) { setBookedRanges([]); return; }
+  const loadBookedRanges = (terrainId: string) => {
     supabase
       .from('reservations')
       .select('date_debut, date_fin')
-      .eq('terrain_id', selectedTerrain.id)
+      .eq('terrain_id', terrainId)
       .not('statut', 'in', '("annulé","terminé")')
       .then(({ data }) => {
         if (data) {
           setBookedRanges(data.map(r => ({ debut: new Date(r.date_debut), fin: new Date(r.date_fin) })));
         }
       });
-  }, [selectedTerrain]);
+  };
+
+  useEffect(() => {
+    if (!selectedTerrain) { setBookedRanges([]); return; }
+    loadBookedRanges(selectedTerrain.id);
+  }, [selectedTerrain, calDate]);
 
   const daySlots = useMemo(() => buildDaySlots(calDate), [calDate]);
   const nextDaySlots = useMemo(() => {

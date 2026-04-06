@@ -29,7 +29,7 @@ const EDIT_WINDOW_MS = 5 * 60 * 1000;
 
 function isSlotBlockedEdit(slot: SlotHour, currentResId: string, nowMs: number, bookedRanges: { id: string; debut: Date; fin: Date }[]): boolean {
   if (slot.startDate.getTime() < nowMs) return true;
-  return bookedRanges.some(r => r.id !== currentResId && slot.startDate < r.fin && slot.endDate > r.debut);
+  return bookedRanges.some(r => r.id !== currentResId && slot.startDate.getTime() < r.fin.getTime() && slot.endDate.getTime() > r.debut.getTime());
 }
 
 export function RsvpPage({ code }: RsvpPageProps) {
