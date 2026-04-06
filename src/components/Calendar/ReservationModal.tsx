@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
-import { X, Loader2, LogIn, LogOut, Ban, Sun, Moon } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { X, Loader2, LogIn, LogOut, Ban, Sun, Moon, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Reservation } from '../../types';
+import { calcTarifBySlots } from '../utils/tarifUtils';
 
 interface ReservationModalProps {
   reservation: Reservation | null;
@@ -12,56 +13,9 @@ interface ReservationModalProps {
   onClose: () => void;
 }
 
-type Creneau = 'jour' | 'nuit' | 'custom';
-
 function formatDatetimeLocal(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function buildCreneauDates(baseDate: Date, creneau: Creneau, heureDebutJour: string, heureDebutNuit: string): { debut: string; fin: string } {
-  const d = new Date(baseDate);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-  if (creneau === 'jour') {
-    const [hj, mj] = heureDebutJour.split(':').map(Number);
-    const [hn, mn] = heureDebutNuit.split(':').map(Number);
-    return {
-      debut: `${dateStr}T${pad(hj)}:${pad(mj)}`,
-      fin: `${dateStr}T${pad(hn)}:${pad(mn)}`,
-    };
-  }
-
-  if (creneau === 'nuit') {
-    const [hn, mn] = heureDebutNuit.split(':').map(Number);
-    const debutNuit = new Date(d);
-    debutNuit.setHours(hn, mn, 0, 0);
-    const finNuit = new Date(debutNuit);
-    finNuit.setDate(finNuit.getDate() + 1);
-    const [hj, mj] = heureDebutJour.split(':').map(Number);
-    finNuit.setHours(hj, mj, 0, 0);
-    return {
-      debut: formatDatetimeLocal(debutNuit),
-      fin: formatDatetimeLocal(finNuit),
-    };
-  }
-
-  return {
-    debut: formatDatetimeLocal(baseDate),
-    fin: formatDatetimeLocal(new Date(baseDate.getTime() + 3600000)),
-  };
-}
-
-function detectCreneau(dateDebut: string, dateFin: string, heureDebutJour: string, heureDebutNuit: string): Creneau {
-  const d = new Date(dateDebut);
-  const f = new Date(dateFin);
-  const [hj] = heureDebutJour.split(':').map(Number);
-  const [hn] = heureDebutNuit.split(':').map(Number);
-
-  if (d.getHours() === hj && f.getHours() === hn) return 'jour';
-  if (d.getHours() === hn) return 'nuit';
-  return 'custom';
 }
 
 export function ReservationModal({ reservation, initialDate, initialTerrainId, onClose }: ReservationModalProps) {
@@ -72,40 +26,34 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
   const activeTerrain = terrains.filter(t => t.is_active);
   const defaultTerrain = activeTerrain.find(t => t.id === initialTerrainId) || activeTerrain[0];
 
-  const defaultHeureJour = defaultTerrain?.heure_debut_jour || '08:00';
-  const defaultHeureNuit = defaultTerrain?.heure_debut_nuit || '18:00';
   const baseDate = initialDate || new Date();
-  const defaultCreneau: Creneau = 'jour';
-  const defaultDates = buildCreneauDates(baseDate, defaultCreneau, defaultHeureJour, defaultHeureNuit);
+  const heureJourDefault = parseInt((defaultTerrain?.heure_debut_jour || '08:00').split(':')[0]);
+  const heureNuitDefault = parseInt((defaultTerrain?.heure_debut_nuit || '18:00').split(':')[0]);
+
+  const defaultDebut = new Date(baseDate);
+  defaultDebut.setHours(heureJourDefault, 0, 0, 0);
+  const defaultFin = new Date(defaultDebut);
+  defaultFin.setHours(heureNuitDefault, 0, 0, 0);
 
   const [form, setForm] = useState({
     terrain_id: defaultTerrain?.id || '',
     client_name: '',
     client_phone: '',
-    date_debut: defaultDates.debut,
-    date_fin: defaultDates.fin,
+    date_debut: formatDatetimeLocal(defaultDebut),
+    date_fin: formatDatetimeLocal(defaultFin),
     notes: '',
     statut: 'réservé' as Reservation['statut'],
   });
-  const [creneau, setCreneau] = useState<Creneau>(defaultCreneau);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   const canDelete = hasPermission('cancel_reservations') || profile?.role === 'admin';
-
   const selectedTerrain = terrains.find(t => t.id === form.terrain_id);
-  const heureJour = selectedTerrain?.heure_debut_jour || '08:00';
-  const heureNuit = selectedTerrain?.heure_debut_nuit || '18:00';
 
   useEffect(() => {
     if (reservation) {
-      const detectedCreneau = detectCreneau(
-        reservation.date_debut,
-        reservation.date_fin,
-        reservation.terrain?.heure_debut_jour || '08:00',
-        reservation.terrain?.heure_debut_nuit || '18:00'
-      );
-      setCreneau(detectedCreneau);
       setForm({
         terrain_id: reservation.terrain_id,
         client_name: reservation.client_name,
@@ -118,43 +66,31 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
     }
   }, [reservation]);
 
-  const handleTerrainChange = (terrainId: string) => {
-    const t = terrains.find(x => x.id === terrainId);
-    const hj = t?.heure_debut_jour || '08:00';
-    const hn = t?.heure_debut_nuit || '18:00';
-    const base = new Date(form.date_debut);
-    if (creneau !== 'custom') {
-      const dates = buildCreneauDates(base, creneau, hj, hn);
-      setForm(f => ({ ...f, terrain_id: terrainId, date_debut: dates.debut, date_fin: dates.fin }));
-    } else {
-      setForm(f => ({ ...f, terrain_id: terrainId }));
-    }
-  };
-
-  const handleCreneauChange = (c: Creneau) => {
-    setCreneau(c);
-    if (c !== 'custom') {
-      const base = new Date(form.date_debut);
-      const dates = buildCreneauDates(base, c, heureJour, heureNuit);
-      setForm(f => ({ ...f, date_debut: dates.debut, date_fin: dates.fin }));
-    }
-  };
-
-  const calcTarif = () => {
-    if (!selectedTerrain) return 0;
-    if (creneau === 'jour' && selectedTerrain.tarif_jour > 0) return selectedTerrain.tarif_jour;
-    if (creneau === 'nuit' && selectedTerrain.tarif_nuit > 0) return selectedTerrain.tarif_nuit;
+  const tarifResult = useMemo(() => {
+    if (!selectedTerrain || !form.date_debut || !form.date_fin) return null;
     const debut = new Date(form.date_debut);
     const fin = new Date(form.date_fin);
-    const hours = Math.max(0, (fin.getTime() - debut.getTime()) / 3600000);
-    return hours * selectedTerrain.tarif_horaire;
+    if (fin <= debut) return null;
+    return calcTarifBySlots(debut, fin, selectedTerrain);
+  }, [form.date_debut, form.date_fin, form.terrain_id, selectedTerrain]);
+
+  const handleTerrainChange = (terrainId: string) => {
+    const t = terrains.find(x => x.id === terrainId);
+    const hj = parseInt((t?.heure_debut_jour || '08:00').split(':')[0]);
+    const hn = parseInt((t?.heure_debut_nuit || '18:00').split(':')[0]);
+    const base = new Date(form.date_debut);
+    const debut = new Date(base);
+    debut.setHours(hj, 0, 0, 0);
+    const fin = new Date(debut);
+    fin.setHours(hn, 0, 0, 0);
+    setForm(f => ({ ...f, terrain_id: terrainId, date_debut: formatDatetimeLocal(debut), date_fin: formatDatetimeLocal(fin) }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const tarif = calcTarif();
+    const tarif = tarifResult?.total || 0;
     try {
       if (isEdit) {
         const { error } = await supabase.from('reservations').update({
@@ -198,12 +134,8 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
     if (!reservation) return;
     setLoading(true);
     const { error } = await supabase.from('reservations').update({ statut: newStatut }).eq('id', reservation.id);
-    if (!error) {
-      await refreshReservations();
-      onClose();
-    } else {
-      setError(error.message);
-    }
+    if (!error) { await refreshReservations(); onClose(); }
+    else setError(error.message);
     setLoading(false);
   };
 
@@ -211,23 +143,15 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
     if (!reservation || !window.confirm('Annuler cette réservation ?')) return;
     setLoading(true);
     const { error } = await supabase.from('reservations').update({ statut: 'annulé' }).eq('id', reservation.id);
-    if (!error) {
-      await refreshReservations();
-      onClose();
-    }
+    if (!error) { await refreshReservations(); onClose(); }
     setLoading(false);
   };
 
-  const tarif = calcTarif();
   const fmt = (n: number) => new Intl.NumberFormat('fr-FR').format(n);
+  const pad = (n: number) => String(n).padStart(2, '0');
 
-  const formatTimeRange = (debut: string, fin: string) => {
-    if (!debut || !fin) return '';
-    const d = new Date(debut);
-    const f = new Date(fin);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${pad(d.getHours())}h${pad(d.getMinutes())} → ${pad(f.getHours())}h${pad(f.getMinutes())}`;
-  };
+  const heureJour = selectedTerrain?.heure_debut_jour ? parseInt(selectedTerrain.heure_debut_jour.split(':')[0]) : 8;
+  const heureNuit = selectedTerrain?.heure_debut_nuit ? parseInt(selectedTerrain.heure_debut_nuit.split(':')[0]) : 18;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -244,26 +168,17 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
         {isEdit && reservation && (
           <div className="px-5 py-3 border-b border-slate-800 flex gap-2 flex-wrap">
             {reservation.statut === 'réservé' && (
-              <button
-                onClick={() => handleStatusChange('check_in')}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg text-xs transition-all"
-              >
+              <button onClick={() => handleStatusChange('check_in')} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg text-xs transition-all">
                 <LogIn className="w-3.5 h-3.5" /> Check-in
               </button>
             )}
             {reservation.statut === 'check_in' && (
-              <button
-                onClick={() => handleStatusChange('terminé')}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 rounded-lg text-xs transition-all"
-              >
+              <button onClick={() => handleStatusChange('terminé')} className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 rounded-lg text-xs transition-all">
                 <LogOut className="w-3.5 h-3.5" /> Check-out
               </button>
             )}
             {canDelete && !['annulé', 'terminé'].includes(reservation.statut) && (
-              <button
-                onClick={handleDelete}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs transition-all ml-auto"
-              >
+              <button onClick={handleDelete} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs transition-all ml-auto">
                 <Ban className="w-3.5 h-3.5" /> Annuler
               </button>
             )}
@@ -272,9 +187,7 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {error && (
-            <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-4 py-3 rounded-xl">
-              {error}
-            </div>
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-4 py-3 rounded-xl">{error}</div>
           )}
 
           <div className="space-y-1.5">
@@ -291,122 +204,47 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
             </select>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-slate-400">Créneau</label>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => handleCreneauChange('jour')}
-                className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
-                  creneau === 'jour'
-                    ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
-                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                }`}
-              >
-                <Sun className="w-4 h-4" />
-                <span className="text-xs font-medium">Journée</span>
-                {selectedTerrain?.tarif_jour ? (
-                  <span className="text-xs font-bold">{fmt(selectedTerrain.tarif_jour)} F</span>
-                ) : null}
-                <span className="text-[10px] text-slate-500">{heureJour} – {heureNuit}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleCreneauChange('nuit')}
-                className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
-                  creneau === 'nuit'
-                    ? 'bg-blue-500/10 border-blue-500/40 text-blue-400'
-                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                }`}
-              >
-                <Moon className="w-4 h-4" />
-                <span className="text-xs font-medium">Nuit</span>
-                {selectedTerrain?.tarif_nuit ? (
-                  <span className="text-xs font-bold">{fmt(selectedTerrain.tarif_nuit)} F</span>
-                ) : null}
-                <span className="text-[10px] text-slate-500">{heureNuit} – {heureJour}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleCreneauChange('custom')}
-                className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border transition-all ${
-                  creneau === 'custom'
-                    ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
-                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                }`}
-              >
-                <span className="text-base leading-none">⏱</span>
-                <span className="text-xs font-medium">Horaire</span>
-                {selectedTerrain?.tarif_horaire ? (
-                  <span className="text-xs font-bold">{fmt(selectedTerrain.tarif_horaire)} F/h</span>
-                ) : null}
-                <span className="text-[10px] text-slate-500">Personnalisé</span>
-              </button>
-            </div>
-
-            {creneau !== 'custom' && (
-              <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl px-3 py-2 text-center">
-                <span className="text-xs text-slate-400">
-                  {formatTimeRange(form.date_debut, form.date_fin)}
-                </span>
+          {selectedTerrain && (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-amber-500/5 border border-amber-500/15 rounded-xl px-3 py-2 flex items-center gap-2">
+                <Sun className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                <div>
+                  <p className="text-[10px] text-slate-500">{pad(heureJour)}h – {pad(heureNuit)}h (sem.)</p>
+                  <p className="text-xs font-bold text-amber-400">{fmt(selectedTerrain.tarif_jour || selectedTerrain.tarif_horaire)} F</p>
+                </div>
               </div>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-slate-400">Date</label>
-            <input
-              type="date"
-              value={form.date_debut.split('T')[0]}
-              onChange={(e) => {
-                const dateStr = e.target.value;
-                if (!dateStr) return;
-                const base = new Date(dateStr + 'T12:00:00');
-                if (creneau !== 'custom') {
-                  const dates = buildCreneauDates(base, creneau, heureJour, heureNuit);
-                  setForm(f => ({ ...f, date_debut: dates.debut, date_fin: dates.fin }));
-                } else {
-                  const prevDebut = new Date(form.date_debut);
-                  const prevFin = new Date(form.date_fin);
-                  const pad = (n: number) => String(n).padStart(2, '0');
-                  setForm(f => ({
-                    ...f,
-                    date_debut: `${dateStr}T${pad(prevDebut.getHours())}:${pad(prevDebut.getMinutes())}`,
-                    date_fin: `${dateStr}T${pad(prevFin.getHours())}:${pad(prevFin.getMinutes())}`,
-                  }));
-                }
-              }}
-              required
-              className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          {creneau === 'custom' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-400">Début</label>
-                <input
-                  type="datetime-local"
-                  value={form.date_debut}
-                  onChange={(e) => setForm(f => ({ ...f, date_debut: e.target.value }))}
-                  required
-                  className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-400">Fin</label>
-                <input
-                  type="datetime-local"
-                  value={form.date_fin}
-                  onChange={(e) => setForm(f => ({ ...f, date_fin: e.target.value }))}
-                  required
-                  className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
+              <div className="bg-blue-500/5 border border-blue-500/15 rounded-xl px-3 py-2 flex items-center gap-2">
+                <Moon className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                <div>
+                  <p className="text-[10px] text-slate-500">{pad(heureNuit)}h – {pad(heureJour)}h / WE</p>
+                  <p className="text-xs font-bold text-blue-400">{fmt(selectedTerrain.tarif_nuit || selectedTerrain.tarif_horaire)} F</p>
+                </div>
               </div>
             </div>
           )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-400">Début</label>
+              <input
+                type="datetime-local"
+                value={form.date_debut}
+                onChange={(e) => setForm(f => ({ ...f, date_debut: e.target.value }))}
+                required
+                className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-slate-400">Fin</label>
+              <input
+                type="datetime-local"
+                value={form.date_fin}
+                onChange={(e) => setForm(f => ({ ...f, date_fin: e.target.value }))}
+                required
+                className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -442,25 +280,63 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
             />
           </div>
 
-          {tarif > 0 && (
-            <div className={`rounded-xl px-4 py-3 flex items-center justify-between ${
-              creneau === 'jour' ? 'bg-amber-500/10 border border-amber-500/20' :
-              creneau === 'nuit' ? 'bg-blue-500/10 border border-blue-500/20' :
-              'bg-emerald-500/10 border border-emerald-500/20'
-            }`}>
-              <div>
-                <span className="text-xs text-slate-400 block">
-                  {creneau === 'jour' ? 'Tarif journée' : creneau === 'nuit' ? 'Tarif nuit' : 'Tarif estimé'}
-                </span>
-                <span className="text-[10px] text-slate-500">{formatTimeRange(form.date_debut, form.date_fin)}</span>
-              </div>
-              <span className={`font-bold text-lg ${
-                creneau === 'jour' ? 'text-amber-400' :
-                creneau === 'nuit' ? 'text-blue-400' :
-                'text-emerald-400'
-              }`}>
-                {fmt(tarif)} FCFA
-              </span>
+          {tarifResult && tarifResult.total > 0 && (
+            <div className="rounded-xl overflow-hidden border border-slate-700">
+              <button
+                type="button"
+                onClick={() => setShowBreakdown(!showBreakdown)}
+                className="w-full px-4 py-3 flex items-center justify-between bg-slate-800/60 hover:bg-slate-800 transition-all"
+              >
+                <div>
+                  <span className="text-xs text-slate-400 block text-left">Tarif total</span>
+                  <span className="font-bold text-lg text-white">{fmt(tarifResult.total)} FCFA</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">{tarifResult.slots.length}h</span>
+                  {showBreakdown ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                </div>
+              </button>
+
+              {showBreakdown && (
+                <div className="bg-slate-800/30 border-t border-slate-700/50 max-h-48 overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-px bg-slate-700/30 text-[10px] font-medium text-slate-500 px-4 py-1.5">
+                    <span>Créneau</span>
+                    <span className="text-right">Tarif</span>
+                  </div>
+                  {tarifResult.slots.map((slot, i) => (
+                    <div key={i} className={`flex items-center justify-between px-4 py-1.5 text-xs border-b border-slate-700/30 last:border-0 ${slot.isNight ? 'bg-blue-500/3' : 'bg-amber-500/3'}`}>
+                      <div className="flex items-center gap-1.5">
+                        {slot.isNight
+                          ? <Moon className="w-3 h-3 text-blue-400 flex-shrink-0" />
+                          : <Sun className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                        }
+                        <span className="text-slate-300">{slot.label}</span>
+                        {slot.isWeekend && <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1 rounded">WE</span>}
+                      </div>
+                      <span className={`font-medium ${slot.isNight ? 'text-blue-400' : 'text-amber-400'}`}>
+                        {fmt(slot.tarif)} F
+                      </span>
+                    </div>
+                  ))}
+                  <div className="px-4 py-2 flex justify-between text-xs bg-slate-800/50">
+                    <span className="text-slate-400">
+                      {tarifResult.breakdown.slotJour > 0 && (
+                        <span className="mr-3">
+                          <Sun className="w-3 h-3 text-amber-400 inline mr-1" />
+                          {tarifResult.breakdown.slotJour}h × {fmt(tarifResult.breakdown.jour)} F
+                        </span>
+                      )}
+                      {tarifResult.breakdown.slotNuit > 0 && (
+                        <span>
+                          <Moon className="w-3 h-3 text-blue-400 inline mr-1" />
+                          {tarifResult.breakdown.slotNuit}h × {fmt(tarifResult.breakdown.nuit)} F
+                        </span>
+                      )}
+                    </span>
+                    <span className="font-bold text-white">{fmt(tarifResult.total)} F</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
