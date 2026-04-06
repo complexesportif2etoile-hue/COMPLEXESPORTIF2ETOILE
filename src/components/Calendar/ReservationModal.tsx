@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, Loader2, LogIn, LogOut, Ban, Sun, Moon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Loader2, LogIn, LogOut, Ban, Sun, Moon, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -21,7 +21,7 @@ const MONTH_NAMES = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oc
 const DAY_NAMES = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
 
 export function ReservationModal({ reservation, initialDate, initialTerrainId, onClose }: ReservationModalProps) {
-  const { terrains, refreshReservations } = useData();
+  const { terrains, reservations, refreshReservations } = useData();
   const { profile, hasPermission } = useAuth();
   const isEdit = !!reservation;
 
@@ -42,6 +42,24 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
   const [error, setError] = useState('');
 
   const canDelete = hasPermission('cancel_reservations') || profile?.role === 'admin';
+  const now = useMemo(() => new Date(), []);
+
+  const isSlotPast = (slot: SlotHour) => slot.startDate.getTime() < now.getTime();
+
+  const isSlotBooked = (slot: SlotHour): boolean => {
+    const slotStart = slot.startDate.getTime();
+    const slotEnd = slot.endDate.getTime();
+    return reservations.some((r) => {
+      if (r.terrain_id !== selectedTerrainId) return false;
+      if (['annulé', 'terminé', 'check_out'].includes(r.statut)) return false;
+      if (isEdit && r.id === reservation?.id) return false;
+      const rStart = new Date(r.date_debut).getTime();
+      const rEnd = new Date(r.date_fin).getTime();
+      return slotStart < rEnd && slotEnd > rStart;
+    });
+  };
+
+  const isSlotBlocked = (slot: SlotHour) => isSlotPast(slot) || isSlotBooked(slot);
 
   useEffect(() => {
     if (reservation) {
@@ -75,6 +93,7 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
     selectedSlots.some(s => s.startDate.getTime() === slot.startDate.getTime());
 
   const toggleSlot = (slot: SlotHour) => {
+    if (isSlotBlocked(slot)) return;
     if (isSlotSelected(slot)) {
       setSelectedSlots(prev => prev.filter(s => s.startDate.getTime() !== slot.startDate.getTime()));
     } else {
@@ -256,37 +275,53 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
             <div className="grid grid-cols-2 gap-1.5">
               {allVisibleSlots.map((slot, i) => {
                 const selected = isSlotSelected(slot);
+                const past = isSlotPast(slot);
+                const booked = isSlotBooked(slot);
+                const blocked = past || booked;
                 const isNextDay = slot.startDate.getDate() !== calDate.getDate();
                 return (
                   <button
                     key={i}
                     type="button"
                     onClick={() => toggleSlot(slot)}
+                    disabled={blocked}
+                    title={past ? 'Créneau passé' : booked ? 'Déjà réservé' : undefined}
                     className={`
                       relative flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all
-                      ${selected
-                        ? slot.isNight
-                          ? 'bg-blue-500/20 border-blue-500 text-blue-300'
-                          : 'bg-amber-500/20 border-amber-500 text-amber-300'
-                        : slot.isNight
-                          ? 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-blue-500/40 hover:bg-blue-500/5'
-                          : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-amber-500/40 hover:bg-amber-500/5'
+                      ${blocked
+                        ? booked
+                          ? 'bg-red-500/10 border-red-500/30 text-red-400/60 cursor-not-allowed'
+                          : 'bg-slate-800/30 border-slate-700/30 text-slate-600 cursor-not-allowed'
+                        : selected
+                          ? slot.isNight
+                            ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                            : 'bg-amber-500/20 border-amber-500 text-amber-300'
+                          : slot.isNight
+                            ? 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-blue-500/40 hover:bg-blue-500/5'
+                            : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-amber-500/40 hover:bg-amber-500/5'
                       }
                     `}
                   >
                     <div className="flex items-center gap-1.5">
-                      {slot.isNight
-                        ? <Moon className="w-3 h-3 text-blue-400 flex-shrink-0" />
-                        : <Sun className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                      {blocked
+                        ? <Lock className="w-3 h-3 flex-shrink-0 opacity-50" />
+                        : slot.isNight
+                          ? <Moon className="w-3 h-3 text-blue-400 flex-shrink-0" />
+                          : <Sun className="w-3 h-3 text-amber-400 flex-shrink-0" />
                       }
-                      <span className="font-medium">{slot.label}</span>
-                      {isNextDay && (
+                      <span className={`font-medium ${blocked ? 'line-through opacity-60' : ''}`}>{slot.label}</span>
+                      {isNextDay && !blocked && (
                         <span className="text-[9px] text-slate-500 bg-slate-700 px-1 rounded">+1j</span>
                       )}
+                      {booked && (
+                        <span className="text-[9px] text-red-400/70 bg-red-500/10 px-1 rounded">Réservé</span>
+                      )}
                     </div>
-                    <span className={`font-semibold text-[11px] ${slot.isNight ? 'text-blue-400' : 'text-amber-400'}`}>
-                      {fmt(slot.tarif)}
-                    </span>
+                    {!blocked && (
+                      <span className={`font-semibold text-[11px] ${slot.isNight ? 'text-blue-400' : 'text-amber-400'}`}>
+                        {fmt(slot.tarif)}
+                      </span>
+                    )}
                   </button>
                 );
               })}
