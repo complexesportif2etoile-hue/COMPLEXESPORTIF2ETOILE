@@ -26,6 +26,12 @@ const PAYMENT_COLORS: Record<string, string> = {
   UNPAID: 'text-red-400', PARTIAL: 'text-amber-400', PAID: 'text-emerald-400',
 };
 
+const NEW_BADGE_WINDOW_MS = 15 * 60 * 1000;
+
+function isNew(r: Reservation): boolean {
+  return r.statut === 'en_attente' && Date.now() - new Date(r.created_at).getTime() < NEW_BADGE_WINDOW_MS;
+}
+
 export function ClientMenu() {
   const { reservations, encaissements, refreshReservations, refreshEncaissements } = useData();
   const { hasPermission } = useAuth();
@@ -41,15 +47,23 @@ export function ClientMenu() {
   const canManage = hasPermission('manage_reservations');
   const canPay = hasPermission('manage_payments');
 
-  const filtered = useMemo(() => reservations.filter((r) => {
-    const matchSearch = r.client_name.toLowerCase().includes(search.toLowerCase()) ||
-      r.client_phone.includes(search) ||
-      r.code_court?.toLowerCase().includes(search.toLowerCase()) ||
-      r.terrain?.name?.toLowerCase().includes(search.toLowerCase());
-    const matchStatut = filterStatut === 'all' || r.statut === filterStatut;
-    const matchPayment = filterPayment === 'all' || r.payment_status === filterPayment;
-    return matchSearch && matchStatut && matchPayment;
-  }), [reservations, search, filterStatut, filterPayment]);
+  const filtered = useMemo(() => {
+    const list = reservations.filter((r) => {
+      const matchSearch = r.client_name.toLowerCase().includes(search.toLowerCase()) ||
+        r.client_phone.includes(search) ||
+        r.code_court?.toLowerCase().includes(search.toLowerCase()) ||
+        r.terrain?.name?.toLowerCase().includes(search.toLowerCase());
+      const matchStatut = filterStatut === 'all' || r.statut === filterStatut;
+      const matchPayment = filterPayment === 'all' || r.payment_status === filterPayment;
+      return matchSearch && matchStatut && matchPayment;
+    });
+    return [...list].sort((a, b) => {
+      const aNew = isNew(a) ? 1 : 0;
+      const bNew = isNew(b) ? 1 : 0;
+      if (bNew !== aNew) return bNew - aNew;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }, [reservations, search, filterStatut, filterPayment]);
 
   const getEncaissementsForRes = (resId: string) =>
     encaissements.filter((e) => e.reservation_id === resId);
@@ -125,8 +139,17 @@ export function ClientMenu() {
               {filtered.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-800/30 transition-colors">
                   <td className="px-5 py-3">
-                    <p className="text-sm font-medium text-slate-200">{r.client_name}</p>
-                    <p className="text-xs text-slate-500">{r.client_phone}</p>
+                    <div className="flex items-center gap-2">
+                      {isNew(r) && (
+                        <span className="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500 text-white animate-pulse">
+                          Nouveau
+                        </span>
+                      )}
+                      <div>
+                        <p className="text-sm font-medium text-slate-200">{r.client_name}</p>
+                        <p className="text-xs text-slate-500">{r.client_phone}</p>
+                      </div>
+                    </div>
                   </td>
                   <td className="px-5 py-3 hidden md:table-cell">
                     <p className="text-sm text-slate-300">{r.terrain?.name || '-'}</p>
