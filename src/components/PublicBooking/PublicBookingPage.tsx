@@ -13,6 +13,11 @@ type Step = 'terrain' | 'slots' | 'info' | 'payment' | 'confirm';
 const MONTH_NAMES = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
 const DAY_NAMES = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
 
+function isSlotBlocked(slot: SlotHour, now: Date, bookedRanges: { debut: Date; fin: Date }[]): boolean {
+  if (slot.startDate < now) return true;
+  return bookedRanges.some(r => slot.startDate < r.fin && slot.endDate > r.debut);
+}
+
 export function PublicBookingPage() {
   const [step, setStep] = useState<Step>('terrain');
   const [terrains, setTerrains] = useState<Terrain[]>([]);
@@ -26,6 +31,8 @@ export function PublicBookingPage() {
   const [loading, setLoading] = useState(false);
   const [bookingCode, setBookingCode] = useState('');
   const [error, setError] = useState('');
+  const [bookedRanges, setBookedRanges] = useState<{ debut: Date; fin: Date }[]>([]);
+  const [now] = useState<Date>(() => new Date());
 
   useEffect(() => {
     supabase.from('terrains').select('*').eq('is_active', true).then(({ data }) => {
@@ -35,6 +42,20 @@ export function PublicBookingPage() {
       if (data) setDepositSettings(data);
     });
   }, []);
+
+  useEffect(() => {
+    if (!selectedTerrain) { setBookedRanges([]); return; }
+    supabase
+      .from('reservations')
+      .select('date_debut, date_fin')
+      .eq('terrain_id', selectedTerrain.id)
+      .not('statut', 'in', '("annulé","terminé")')
+      .then(({ data }) => {
+        if (data) {
+          setBookedRanges(data.map(r => ({ debut: new Date(r.date_debut), fin: new Date(r.date_fin) })));
+        }
+      });
+  }, [selectedTerrain]);
 
   const daySlots = useMemo(() => buildDaySlots(calDate), [calDate]);
   const nextDaySlots = useMemo(() => {
@@ -231,37 +252,42 @@ export function PublicBookingPage() {
                   <div className="grid grid-cols-2 gap-1.5">
                     {allVisibleSlots.map((slot, i) => {
                       const selected = isSlotSelected(slot);
+                      const blocked = isSlotBlocked(slot, now, bookedRanges);
                       const isNextDay = slot.startDate.getDate() !== calDate.getDate();
                       return (
                         <button
                           key={i}
                           type="button"
-                          onClick={() => toggleSlot(slot)}
+                          disabled={blocked}
+                          onClick={() => !blocked && toggleSlot(slot)}
                           className={`
                             flex items-center justify-between px-3 py-2.5 rounded-xl border text-xs transition-all
-                            ${selected
-                              ? slot.isNight
-                                ? 'bg-blue-500/20 border-blue-500 text-blue-300'
-                                : 'bg-amber-500/20 border-amber-500 text-amber-300'
-                              : slot.isNight
-                                ? 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-blue-400/50 hover:bg-blue-500/5'
-                                : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-amber-400/50 hover:bg-amber-500/5'
+                            ${blocked
+                              ? 'bg-slate-900/60 border-slate-800 text-slate-600 cursor-not-allowed opacity-50 line-through'
+                              : selected
+                                ? slot.isNight
+                                  ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                                  : 'bg-amber-500/20 border-amber-500 text-amber-300'
+                                : slot.isNight
+                                  ? 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-blue-400/50 hover:bg-blue-500/5'
+                                  : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:border-amber-400/50 hover:bg-amber-500/5'
                             }
                           `}
                         >
                           <div className="flex items-center gap-1.5">
                             {slot.isNight
-                              ? <Moon className="w-3 h-3 text-blue-400 flex-shrink-0" />
-                              : <Sun className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                              ? <Moon className={`w-3 h-3 flex-shrink-0 ${blocked ? 'text-slate-600' : 'text-blue-400'}`} />
+                              : <Sun className={`w-3 h-3 flex-shrink-0 ${blocked ? 'text-slate-600' : 'text-amber-400'}`} />
                             }
                             <span className="font-medium">{slot.label}</span>
                             {isNextDay && (
                               <span className="text-[9px] text-slate-500 bg-slate-700 px-1 rounded">+1j</span>
                             )}
                           </div>
-                          <span className={`font-bold text-[11px] ${slot.isNight ? 'text-blue-400' : 'text-amber-400'}`}>
-                            {fmt(slot.tarif)}
-                          </span>
+                          {blocked
+                            ? <span className="text-[10px] text-slate-600">Indispo</span>
+                            : <span className={`font-bold text-[11px] ${slot.isNight ? 'text-blue-400' : 'text-amber-400'}`}>{fmt(slot.tarif)}</span>
+                          }
                         </button>
                       );
                     })}
