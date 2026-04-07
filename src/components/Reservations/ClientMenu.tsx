@@ -75,7 +75,10 @@ export function ClientMenu() {
   const canDelete = hasPermission('cancel_reservations');
 
   const filtered = useMemo(() => {
+    const now = new Date();
     const list = reservations.filter((r) => {
+      const isPastAndPaid = new Date(r.date_fin) < now && r.payment_status === 'PAID';
+      if (isPastAndPaid) return false;
       const matchSearch = r.client_name.toLowerCase().includes(search.toLowerCase()) ||
         r.client_phone.includes(search) ||
         r.code_court?.toLowerCase().includes(search.toLowerCase()) ||
