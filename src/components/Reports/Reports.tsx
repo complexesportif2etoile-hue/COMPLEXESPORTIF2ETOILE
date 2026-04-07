@@ -87,20 +87,9 @@ export function Reports() {
   }, [reservations, filterStart, filterEnd, filterTerrain, filterStatut]);
 
   const filteredEncaissements = useMemo(() => {
-    return encaissements.filter((e) => {
-      if (!filterStart && !filterEnd) return true;
-      const d = new Date(e.created_at);
-      if (filterStart) {
-        const s = new Date(filterStart); s.setHours(0, 0, 0, 0);
-        if (d < s) return false;
-      }
-      if (filterEnd) {
-        const end = new Date(filterEnd); end.setHours(23, 59, 59, 999);
-        if (d > end) return false;
-      }
-      return true;
-    });
-  }, [encaissements, filterStart, filterEnd]);
+    const resIds = new Set(filteredReservations.map((r) => r.id));
+    return encaissements.filter((e) => resIds.has(e.reservation_id));
+  }, [encaissements, filteredReservations]);
 
   const filteredDepenses = useMemo(() => {
     return depenses.filter((d) => {
@@ -118,10 +107,12 @@ export function Reports() {
   }, [depenses, filterStart, filterEnd]);
 
   const stats = useMemo(() => {
+    const activeRes = filteredReservations.filter((r) => !['annulé', 'bloqué'].includes(r.statut));
+    const totalRevenueDu = activeRes.reduce((s, r) => s + r.amount_due, 0);
     const totalRevenue = filteredEncaissements.reduce((s, e) => s + e.montant_total, 0);
     const totalDepenses = filteredDepenses.reduce((s, d) => s + d.montant, 0);
-    const tva = filteredReservations.reduce((s, r) => s + (r.tva_applicable ? r.montant_tva : 0), 0);
-    const ht = totalRevenue - tva;
+    const tva = activeRes.reduce((s, r) => s + (r.tva_applicable ? r.montant_tva : 0), 0);
+    const ht = totalRevenueDu - tva;
 
     const completed = filteredReservations.filter((r) => ['terminé', 'check_out'].includes(r.statut)).length;
     const cancelled = filteredReservations.filter((r) => r.statut === 'annulé').length;
@@ -192,7 +183,7 @@ export function Reports() {
     })();
 
     return {
-      totalRevenue, totalDepenses, beneficeNet: totalRevenue - totalDepenses,
+      totalRevenueDu, totalRevenue, totalDepenses, beneficeNet: totalRevenueDu - totalDepenses,
       ht, tva, completed, cancelled, inProgress, pending, total,
       completionRate, cancellationRate, avgRevenue, activeTerrains,
       byStatut, byTerrain, hourCounts, peakHour, peakCount,
@@ -368,10 +359,10 @@ function GeneralTab({ stats, fmt, terrains }: { stats: ReturnType<typeof compute
           icon={DollarSign}
           iconBg="bg-emerald-500/20"
           iconColor="text-emerald-400"
-          value={fmt(stats.totalRevenue)}
+          value={fmt(stats.totalRevenueDu)}
           valueSub="CFA"
-          label="Revenus TTC"
-          sub={`HT: ${fmt(stats.ht)} · TVA: ${fmt(stats.tva)}`}
+          label="CA Total (dû)"
+          sub={`Encaissé: ${fmt(stats.totalRevenue)} · Reste: ${fmt(stats.totalRevenueDu - stats.totalRevenue)}`}
           topRight
         />
         <BigStatCard
@@ -544,18 +535,26 @@ function FinanceTab({ stats, fmt, filteredDepenses }: { stats: any; fmt: (n: num
   return (
     <div className="space-y-4">
       <div className={`rounded-2xl border p-4 ${stats.beneficeNet >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
-        <p className="text-xs text-slate-400 mb-1">Bénéfice net</p>
+        <p className="text-xs text-slate-400 mb-1">Bénéfice net (CA dû - Dépenses)</p>
         <p className={`text-3xl font-bold ${stats.beneficeNet >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
           {stats.beneficeNet >= 0 ? '+' : ''}{fmt(stats.beneficeNet)} CFA
         </p>
-        <div className="mt-2 flex gap-4 text-xs text-slate-500">
-          <span>Revenus : <span className="text-emerald-400 font-medium">{fmt(stats.totalRevenue)} CFA</span></span>
+        <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+          <span>CA dû : <span className="text-emerald-400 font-medium">{fmt(stats.totalRevenueDu)} CFA</span></span>
+          <span>Encaissé : <span className="text-cyan-400 font-medium">{fmt(stats.totalRevenue)} CFA</span></span>
           <span>Dépenses : <span className="text-red-400 font-medium">{fmt(stats.totalDepenses)} CFA</span></span>
         </div>
-        {stats.totalRevenue > 0 && (
+        {stats.totalRevenueDu > 0 && (
           <div className="mt-2 text-xs text-slate-500">
+            Reste à encaisser : <span className="font-medium text-amber-400">
+              {fmt(stats.totalRevenueDu - stats.totalRevenue)} CFA
+            </span>
+          </div>
+        )}
+        {stats.totalRevenueDu > 0 && (
+          <div className="mt-1 text-xs text-slate-500">
             Marge : <span className={`font-medium ${stats.beneficeNet >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {Math.round((stats.beneficeNet / stats.totalRevenue) * 100)}%
+              {Math.round((stats.beneficeNet / stats.totalRevenueDu) * 100)}%
             </span>
           </div>
         )}
@@ -741,8 +740,8 @@ function OnlineVsDirectCard({ stats, fmt }: { stats: any; fmt: (n: number) => st
       </div>
 
       <div className="flex items-center justify-between pt-3 border-t border-slate-800">
-        <span className="text-xs text-slate-500">CA total</span>
-        <span className="text-sm font-bold text-white">{fmt(stats.totalRevenue)} CFA</span>
+        <span className="text-xs text-slate-500">CA total dû</span>
+        <span className="text-sm font-bold text-white">{fmt(stats.totalRevenueDu)} CFA</span>
       </div>
     </div>
   );
