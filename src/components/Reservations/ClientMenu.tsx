@@ -88,7 +88,7 @@ export function ClientMenu() {
       const aNew = isNew(a) ? 1 : 0;
       const bNew = isNew(b) ? 1 : 0;
       if (bNew !== aNew) return bNew - aNew;
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      return new Date(a.date_debut).getTime() - new Date(b.date_debut).getTime();
     });
   }, [reservations, search, filterStatut, filterPayment]);
 
