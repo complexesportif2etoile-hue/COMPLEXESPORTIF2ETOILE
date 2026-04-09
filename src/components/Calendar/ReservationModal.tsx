@@ -40,6 +40,10 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
   const [calDate, setCalDate] = useState<Date>(initialDate ? new Date(initialDate) : new Date());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [addPayment, setAddPayment] = useState(false);
+  const [paymentMode, setPaymentMode] = useState<'especes' | 'wave' | 'orange_money' | 'mixte' | 'autre'>('especes');
+  const [paymentType, setPaymentType] = useState<'avance' | 'acompte' | 'solde' | 'autre'>('acompte');
+  const [paymentAmount, setPaymentAmount] = useState('');
 
   const canDelete = hasPermission('cancel_reservations') || profile?.role === 'admin';
   const now = useMemo(() => new Date(), []);
@@ -124,6 +128,14 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
     e.preventDefault();
     if (!range) { setError('Sélectionnez au moins un créneau'); return; }
     if (!consecutive) { setError('Les créneaux doivent être consécutifs'); return; }
+    if (addPayment && (!paymentAmount || parseFloat(paymentAmount) <= 0)) {
+      setError('Entrez un montant de paiement valide');
+      return;
+    }
+    if (addPayment && parseFloat(paymentAmount) > total) {
+      setError('Le montant dépasse le tarif total');
+      return;
+    }
     setError('');
     setLoading(true);
     try {
@@ -142,7 +154,8 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
         }).eq('id', reservation!.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('reservations').insert({
+        const paymentAmount_num = addPayment ? parseFloat(paymentAmount) : 0;
+        const { data: resData, error: resError } = await supabase.from('reservations').insert({
           terrain_id: selectedTerrainId,
           client_name: clientName,
           client_phone: clientPhone,
@@ -153,9 +166,24 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
           tarif_total: total,
           montant_ttc: total,
           amount_due: total,
+          amount_paid: addPayment ? paymentAmount_num : 0,
+          payment_status: addPayment ? (paymentAmount_num >= total ? 'PAID' : 'PARTIAL') : 'UNPAID',
+          payment_method: paymentMode === 'especes' ? 'ON_SITE' : paymentMode === 'wave' ? 'WAVE' : paymentMode === 'orange_money' ? 'ORANGE_MONEY' : 'ON_SITE',
           created_by: profile?.id,
-        });
-        if (error) throw error;
+        }).select().maybeSingle();
+
+        if (resError) throw resError;
+
+        if (addPayment && resData) {
+          const { error: encError } = await supabase.from('encaissements').insert({
+            reservation_id: resData.id,
+            montant_total: paymentAmount_num,
+            mode_paiement: paymentMode,
+            type_versement: paymentType,
+            encaisse_par: profile?.id,
+          });
+          if (encError) throw encError;
+        }
       }
       await refreshReservations();
       onClose();
@@ -401,6 +429,79 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
               className="w-full bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
             />
           </div>
+
+          {!isEdit && (
+            <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-3.5 space-y-3">
+              <button
+                type="button"
+                onClick={() => setAddPayment(!addPayment)}
+                className="w-full text-left text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-2"
+              >
+                <span className={`inline-block w-4 h-4 border border-emerald-400 rounded flex items-center justify-center text-[10px] ${addPayment ? 'bg-emerald-500 border-emerald-500 text-white' : ''}`}>
+                  {addPayment ? '✓' : ''}
+                </span>
+                Ajouter un paiement dès la création
+              </button>
+
+              {addPayment && (
+                <div className="space-y-2.5 pt-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-slate-400">Mode de paiement</label>
+                      <select
+                        value={paymentMode}
+                        onChange={(e) => setPaymentMode(e.target.value as any)}
+                        className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value="especes">Espèces</option>
+                        <option value="wave">Wave</option>
+                        <option value="orange_money">Orange Money</option>
+                        <option value="mixte">Mixte</option>
+                        <option value="autre">Autre</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-slate-400">Type de versement</label>
+                      <select
+                        value={paymentType}
+                        onChange={(e) => setPaymentType(e.target.value as any)}
+                        className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value="avance">Avance</option>
+                        <option value="acompte">Acompte</option>
+                        <option value="solde">Solde</option>
+                        <option value="autre">Autre</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-400">
+                      Montant à payer (max: {fmt(total)} FCFA)
+                    </label>
+                    <input
+                      type="number"
+                      value={paymentAmount}
+                      onChange={(e) => setPaymentAmount(e.target.value)}
+                      placeholder="0"
+                      min="0"
+                      max={total}
+                      step="100"
+                      className="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-500 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    {paymentAmount && (
+                      <p className="text-[11px] text-slate-400">
+                        {parseFloat(paymentAmount) >= total
+                          ? 'Paiement intégral'
+                          : `Acompte: ${((parseFloat(paymentAmount) / total) * 100).toFixed(1)}% du total`
+                        }
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm transition-all">
