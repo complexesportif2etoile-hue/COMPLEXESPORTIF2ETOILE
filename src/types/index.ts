@@ -78,6 +78,7 @@ export interface Encaissement {
   reservation_id: string;
   montant_total: number;
   mode_paiement: 'especes' | 'orange_money' | 'wave' | 'mixte' | 'autre';
+  type_versement: 'avance' | 'acompte' | 'solde' | 'autre';
   details_paiement: Record<string, unknown>;
   encaisse_par?: string;
   created_at: string;

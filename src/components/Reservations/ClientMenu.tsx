@@ -69,6 +69,7 @@ export function ClientMenu() {
   const [showPayModal, setShowPayModal] = useState(false);
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState('especes');
+  const [payType, setPayType] = useState('solde');
   const [loading, setLoading] = useState(false);
 
   const canManage = hasPermission('manage_reservations');
@@ -110,6 +111,7 @@ export function ClientMenu() {
         reservation_id: selected.id,
         montant_total: amount,
         mode_paiement: payMethod,
+        type_versement: payType,
       });
       if (encErr) throw encErr;
       const { error: resErr } = await supabase.from('reservations').update({
@@ -120,6 +122,7 @@ export function ClientMenu() {
       await Promise.all([refreshReservations(), refreshEncaissements()]);
       setShowPayModal(false);
       setPayAmount('');
+      setPayType('solde');
       setSelected(null);
     } catch (err) { console.error(err); }
     setLoading(false);
@@ -136,19 +139,25 @@ export function ClientMenu() {
     await refreshReservations();
   };
 
+  const TYPE_VERSEMENT_LABELS: Record<string, string> = {
+    avance: 'Avance', acompte: 'Acompte', solde: 'Solde', autre: 'Autre',
+  };
+  const MODE_LABELS: Record<string, string> = {
+    especes: 'Espèces', wave: 'Wave', orange_money: 'Orange Money', mixte: 'Mixte', autre: 'Autre',
+  };
+
   const handleGenerateInvoice = (r: Reservation) => {
+    const resEncaissements = getEncaissementsForRes(r.id);
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const W = pdf.internal.pageSize.getWidth();
     const code = r.code_court || r.id.slice(0, 8);
     const dateRes = format(parseISO(r.date_debut), 'dd/MM/yyyy');
+    const dateFin = format(parseISO(r.date_fin), 'dd/MM/yyyy HH:mm');
     const dateNow = new Date().toLocaleDateString('fr-FR');
     const reste = r.amount_due - r.amount_paid;
 
     pdf.setFillColor(255, 255, 255);
     pdf.rect(0, 0, W, 297, 'F');
-
-    pdf.setDrawColor(51, 51, 51);
-    pdf.setLineWidth(0.5);
 
     pdf.setFontSize(26);
     pdf.setFont('helvetica', 'bold');
@@ -180,60 +189,110 @@ export function ClientMenu() {
     pdf.setTextColor(102, 102, 102);
     pdf.text(`Date: ${dateNow}`, W - 15, 47, { align: 'right' });
     pdf.text(`Réservation: ${dateRes}`, W - 15, 54, { align: 'right' });
+    pdf.text(`Fin: ${dateFin}`, W - 15, 60, { align: 'right' });
 
-    const tableY = 75;
+    const tableY = 72;
     pdf.setFillColor(240, 240, 240);
-    pdf.rect(15, tableY, W - 30, 10, 'F');
+    pdf.rect(15, tableY, W - 30, 9, 'F');
     pdf.setDrawColor(51, 51, 51);
     pdf.setLineWidth(0.4);
     pdf.line(15, tableY, W - 15, tableY);
-    pdf.line(15, tableY + 10, W - 15, tableY + 10);
-    pdf.setFontSize(10);
+    pdf.line(15, tableY + 9, W - 15, tableY + 9);
+    pdf.setFontSize(9);
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(33, 33, 33);
-    pdf.text('Description', 20, tableY + 7);
-    pdf.text('Montant', W - 20, tableY + 7, { align: 'right' });
+    pdf.text('Description', 20, tableY + 6.5);
+    pdf.text('Montant', W - 20, tableY + 6.5, { align: 'right' });
 
-    const rowY = tableY + 10;
+    const rowY = tableY + 9;
     pdf.setFont('helvetica', 'normal');
     pdf.setTextColor(33, 33, 33);
-    pdf.text(r.terrain?.name || 'Terrain', 20, rowY + 8);
-    pdf.text(`${fmt(r.amount_due)} FCFA`, W - 20, rowY + 8, { align: 'right' });
+    pdf.text(r.terrain?.name || 'Terrain', 20, rowY + 7);
+    pdf.text(`${fmt(r.amount_due)} FCFA`, W - 20, rowY + 7, { align: 'right' });
     pdf.setDrawColor(200, 200, 200);
-    pdf.line(15, rowY + 12, W - 15, rowY + 12);
+    pdf.setLineWidth(0.3);
+    pdf.line(15, rowY + 10, W - 15, rowY + 10);
 
-    const summaryY = rowY + 25;
+    let encY = rowY + 20;
+    if (resEncaissements.length > 0) {
+      pdf.setFontSize(9);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(102, 102, 102);
+      pdf.text('HISTORIQUE DES VERSEMENTS', 15, encY);
+      encY += 6;
+
+      pdf.setFillColor(240, 240, 240);
+      pdf.rect(15, encY, W - 30, 8, 'F');
+      pdf.setDrawColor(51, 51, 51);
+      pdf.setLineWidth(0.3);
+      pdf.line(15, encY, W - 15, encY);
+      pdf.line(15, encY + 8, W - 15, encY + 8);
+      pdf.setFontSize(8);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(33, 33, 33);
+      pdf.text('Date', 20, encY + 5.5);
+      pdf.text('Type', 65, encY + 5.5);
+      pdf.text('Mode', 105, encY + 5.5);
+      pdf.text('Montant', W - 20, encY + 5.5, { align: 'right' });
+      encY += 8;
+
+      pdf.setFont('helvetica', 'normal');
+      for (const enc of resEncaissements) {
+        const d = new Date(enc.created_at).toLocaleDateString('fr-FR');
+        const tv = enc.type_versement || 'solde';
+        const typeLabel = TYPE_VERSEMENT_LABELS[tv] || 'Solde';
+        const modeLabel = MODE_LABELS[enc.mode_paiement] || enc.mode_paiement;
+        pdf.setTextColor(33, 33, 33);
+        pdf.text(d, 20, encY + 5.5);
+        pdf.setTextColor(
+          tv === 'avance' ? 234 : tv === 'acompte' ? 245 : 33,
+          tv === 'avance' ? 88 : tv === 'acompte' ? 158 : 33,
+          tv === 'avance' ? 12 : tv === 'acompte' ? 11 : 33
+        );
+        pdf.text(typeLabel, 65, encY + 5.5);
+        pdf.setTextColor(33, 33, 33);
+        pdf.text(modeLabel, 105, encY + 5.5);
+        pdf.text(`${fmt(enc.montant_total)} FCFA`, W - 20, encY + 5.5, { align: 'right' });
+        pdf.setDrawColor(220, 220, 220);
+        pdf.line(15, encY + 8, W - 15, encY + 8);
+        encY += 8;
+      }
+      encY += 5;
+    }
+
+    const summaryY = encY + 5;
     const colLeft = W / 2 + 5;
     pdf.setDrawColor(51, 51, 51);
     pdf.setLineWidth(0.5);
     pdf.line(colLeft, summaryY, W - 15, summaryY);
 
     pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'normal');
     pdf.setTextColor(102, 102, 102);
-    pdf.text('Montant dû:', colLeft, summaryY + 8);
-    pdf.text('Montant payé:', colLeft, summaryY + 16);
-    pdf.setFontSize(11);
+    pdf.text('Montant dû:', colLeft, summaryY + 7);
+    pdf.text('Montant payé:', colLeft, summaryY + 14);
+    pdf.setFontSize(10);
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(33, 33, 33);
-    pdf.text(`${fmt(r.amount_due)} FCFA`, W - 15, summaryY + 8, { align: 'right' });
+    pdf.text(`${fmt(r.amount_due)} FCFA`, W - 15, summaryY + 7, { align: 'right' });
     pdf.setTextColor(16, 185, 129);
-    pdf.text(`${fmt(r.amount_paid)} FCFA`, W - 15, summaryY + 16, { align: 'right' });
+    pdf.text(`${fmt(r.amount_paid)} FCFA`, W - 15, summaryY + 14, { align: 'right' });
 
     pdf.setDrawColor(200, 200, 200);
     pdf.setLineWidth(0.3);
-    pdf.line(colLeft, summaryY + 20, W - 15, summaryY + 20);
+    pdf.line(colLeft, summaryY + 18, W - 15, summaryY + 18);
 
     pdf.setFontSize(9);
     pdf.setFont('helvetica', 'normal');
     pdf.setTextColor(102, 102, 102);
-    pdf.text('Reste:', colLeft, summaryY + 28);
-    pdf.text('Statut:', colLeft, summaryY + 36);
+    pdf.text('Reste:', colLeft, summaryY + 25);
+    pdf.text('Statut:', colLeft, summaryY + 32);
     pdf.setFontSize(10);
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(reste > 0 ? 239 : 16, reste > 0 ? 68 : 185, reste > 0 ? 68 : 129);
-    pdf.text(`${fmt(reste)} FCFA`, W - 15, summaryY + 28, { align: 'right' });
+    pdf.text(`${fmt(reste)} FCFA`, W - 15, summaryY + 25, { align: 'right' });
     pdf.setTextColor(33, 33, 33);
-    pdf.text(PAYMENT_LABELS[r.payment_status], W - 15, summaryY + 36, { align: 'right' });
+    pdf.text(PAYMENT_LABELS[r.payment_status], W - 15, summaryY + 32, { align: 'right' });
 
     pdf.setDrawColor(200, 200, 200);
     pdf.setLineWidth(0.3);
@@ -464,15 +523,26 @@ export function ClientMenu() {
                   className="w-full bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-400">Mode de paiement</label>
-                <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                  <option value="especes">Espèces</option>
-                  <option value="wave">Wave</option>
-                  <option value="orange_money">Orange Money</option>
-                  <option value="mixte">Mixte</option>
-                  <option value="autre">Autre</option>
-                </select>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-400">Type de versement</label>
+                  <select value={payType} onChange={(e) => setPayType(e.target.value)} className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="avance">Avance</option>
+                    <option value="acompte">Acompte</option>
+                    <option value="solde">Solde</option>
+                    <option value="autre">Autre</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-400">Mode de paiement</label>
+                  <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} className="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="especes">Espèces</option>
+                    <option value="wave">Wave</option>
+                    <option value="orange_money">Orange Money</option>
+                    <option value="mixte">Mixte</option>
+                    <option value="autre">Autre</option>
+                  </select>
+                </div>
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => { setShowPayModal(false); setSelected(null); }} className="flex-1 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm transition-all">Annuler</button>
