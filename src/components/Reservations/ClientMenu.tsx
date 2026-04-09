@@ -6,7 +6,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Reservation } from '../../types';
 import { format, parseISO } from '../utils/dateUtils';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 
 const STATUT_LABELS: Record<string, string> = {
   en_attente: 'En attente', libre: 'Libre', réservé: 'Réservé',
@@ -137,98 +136,114 @@ export function ClientMenu() {
     await refreshReservations();
   };
 
-  const handleGenerateInvoice = async (r: Reservation) => {
-    const invoiceContent = document.createElement('div');
-    invoiceContent.innerHTML = `
-      <div style="padding: 40px; font-family: Arial, sans-serif; line-height: 1.6;">
-        <div style="text-align: center; margin-bottom: 40px; border-bottom: 2px solid #333; padding-bottom: 20px;">
-          <h1 style="margin: 0; font-size: 28px;">FACTURE</h1>
-          <p style="margin: 5px 0; color: #666;">#${r.code_court || r.id.slice(0, 8)}</p>
-        </div>
+  const handleGenerateInvoice = (r: Reservation) => {
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = pdf.internal.pageSize.getWidth();
+    const code = r.code_court || r.id.slice(0, 8);
+    const dateRes = format(parseISO(r.date_debut), 'dd/MM/yyyy');
+    const dateNow = new Date().toLocaleDateString('fr-FR');
+    const reste = r.amount_due - r.amount_paid;
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 40px;">
-          <div>
-            <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #666; text-transform: uppercase;">Facturé à</h3>
-            <p style="margin: 0; font-weight: bold; font-size: 16px;">${r.client_name}</p>
-            <p style="margin: 5px 0 0 0; color: #666;">${r.client_phone}</p>
-          </div>
-          <div style="text-align: right;">
-            <p style="margin: 0; color: #666;"><strong>Date:</strong> ${new Date().toLocaleDateString('fr-FR')}</p>
-            <p style="margin: 5px 0 0 0; color: #666;"><strong>Réservation:</strong> ${format(parseISO(r.date_debut), 'dd/MM/yyyy')}</p>
-          </div>
-        </div>
+    pdf.setFillColor(255, 255, 255);
+    pdf.rect(0, 0, W, 297, 'F');
 
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-          <thead>
-            <tr style="background-color: #f0f0f0; border-top: 2px solid #333; border-bottom: 2px solid #333;">
-              <th style="padding: 12px; text-align: left; font-weight: bold;">Description</th>
-              <th style="padding: 12px; text-align: right; font-weight: bold;">Montant</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr style="border-bottom: 1px solid #ddd;">
-              <td style="padding: 12px; text-align: left;">${r.terrain?.name || 'Terrain'}</td>
-              <td style="padding: 12px; text-align: right;">${fmt(r.amount_due)} FCFA</td>
-            </tr>
-          </tbody>
-        </table>
+    pdf.setDrawColor(51, 51, 51);
+    pdf.setLineWidth(0.5);
 
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 40px;">
-          <div style="width: 300px;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; border-top: 2px solid #333; padding-top: 15px;">
-              <div style="text-align: left;">
-                <p style="margin: 0; color: #666; font-size: 14px;">Montant dû:</p>
-                <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 18px;">${fmt(r.amount_due)} FCFA</p>
-              </div>
-              <div style="text-align: left;">
-                <p style="margin: 0; color: #666; font-size: 14px;">Montant payé:</p>
-                <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 18px; color: #10b981;">${fmt(r.amount_paid)} FCFA</p>
-              </div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; border-top: 1px solid #ddd; margin-top: 15px; padding-top: 15px;">
-              <div style="text-align: left;">
-                <p style="margin: 0; color: #666; font-size: 12px;">Reste:</p>
-                <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 16px; color: ${r.amount_due - r.amount_paid > 0 ? '#ef4444' : '#10b981'};">${fmt(r.amount_due - r.amount_paid)} FCFA</p>
-              </div>
-              <div style="text-align: left;">
-                <p style="margin: 0; color: #666; font-size: 12px;">Statut:</p>
-                <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 14px;">${PAYMENT_LABELS[r.payment_status]}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+    pdf.setFontSize(26);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(33, 33, 33);
+    pdf.text('FACTURE', W / 2, 25, { align: 'center' });
 
-        <div style="text-align: center; color: #999; font-size: 12px; border-top: 1px solid #ddd; padding-top: 20px;">
-          <p style="margin: 0;">Merci pour votre réservation</p>
-        </div>
-      </div>
-    `;
-    invoiceContent.style.width = '210mm';
-    invoiceContent.style.height = '297mm';
-    invoiceContent.style.position = 'absolute';
-    invoiceContent.style.left = '-9999px';
-    document.body.appendChild(invoiceContent);
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(102, 102, 102);
+    pdf.text(`#${code}`, W / 2, 32, { align: 'center' });
 
-    try {
-      const canvas = await html2canvas(invoiceContent, {
-        scale: 2,
-        logging: false,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-      });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-      });
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Facture_${r.code_court || r.id.slice(0, 8)}.pdf`);
-    } finally {
-      document.body.removeChild(invoiceContent);
-    }
+    pdf.setDrawColor(51, 51, 51);
+    pdf.setLineWidth(0.5);
+    pdf.line(15, 37, W - 15, 37);
+
+    pdf.setFontSize(9);
+    pdf.setTextColor(102, 102, 102);
+    pdf.text('FACTURÉ À', 15, 47);
+    pdf.setFontSize(12);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(33, 33, 33);
+    pdf.text(r.client_name, 15, 54);
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(102, 102, 102);
+    pdf.text(r.client_phone || '', 15, 60);
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(102, 102, 102);
+    pdf.text(`Date: ${dateNow}`, W - 15, 47, { align: 'right' });
+    pdf.text(`Réservation: ${dateRes}`, W - 15, 54, { align: 'right' });
+
+    const tableY = 75;
+    pdf.setFillColor(240, 240, 240);
+    pdf.rect(15, tableY, W - 30, 10, 'F');
+    pdf.setDrawColor(51, 51, 51);
+    pdf.setLineWidth(0.4);
+    pdf.line(15, tableY, W - 15, tableY);
+    pdf.line(15, tableY + 10, W - 15, tableY + 10);
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(33, 33, 33);
+    pdf.text('Description', 20, tableY + 7);
+    pdf.text('Montant', W - 20, tableY + 7, { align: 'right' });
+
+    const rowY = tableY + 10;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(33, 33, 33);
+    pdf.text(r.terrain?.name || 'Terrain', 20, rowY + 8);
+    pdf.text(`${fmt(r.amount_due)} FCFA`, W - 20, rowY + 8, { align: 'right' });
+    pdf.setDrawColor(200, 200, 200);
+    pdf.line(15, rowY + 12, W - 15, rowY + 12);
+
+    const summaryY = rowY + 25;
+    const colLeft = W / 2 + 5;
+    pdf.setDrawColor(51, 51, 51);
+    pdf.setLineWidth(0.5);
+    pdf.line(colLeft, summaryY, W - 15, summaryY);
+
+    pdf.setFontSize(9);
+    pdf.setTextColor(102, 102, 102);
+    pdf.text('Montant dû:', colLeft, summaryY + 8);
+    pdf.text('Montant payé:', colLeft, summaryY + 16);
+    pdf.setFontSize(11);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(33, 33, 33);
+    pdf.text(`${fmt(r.amount_due)} FCFA`, W - 15, summaryY + 8, { align: 'right' });
+    pdf.setTextColor(16, 185, 129);
+    pdf.text(`${fmt(r.amount_paid)} FCFA`, W - 15, summaryY + 16, { align: 'right' });
+
+    pdf.setDrawColor(200, 200, 200);
+    pdf.setLineWidth(0.3);
+    pdf.line(colLeft, summaryY + 20, W - 15, summaryY + 20);
+
+    pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(102, 102, 102);
+    pdf.text('Reste:', colLeft, summaryY + 28);
+    pdf.text('Statut:', colLeft, summaryY + 36);
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(reste > 0 ? 239 : 16, reste > 0 ? 68 : 185, reste > 0 ? 68 : 129);
+    pdf.text(`${fmt(reste)} FCFA`, W - 15, summaryY + 28, { align: 'right' });
+    pdf.setTextColor(33, 33, 33);
+    pdf.text(PAYMENT_LABELS[r.payment_status], W - 15, summaryY + 36, { align: 'right' });
+
+    pdf.setDrawColor(200, 200, 200);
+    pdf.setLineWidth(0.3);
+    pdf.line(15, 270, W - 15, 270);
+    pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(153, 153, 153);
+    pdf.text('Merci pour votre réservation', W / 2, 277, { align: 'center' });
+
+    pdf.save(`Facture_${code}.pdf`);
   };
 
   return (
