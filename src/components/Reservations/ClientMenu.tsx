@@ -393,7 +393,7 @@ export function ClientMenu() {
                     </button>
                   )}
                   <button
-                    onClick={() => handleGenerateInvoice(r)}
+                    onClick={(e) => { e.stopPropagation(); handleGenerateInvoice(r); }}
                     className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-xs transition-all border border-slate-700"
                     title="Générer facture"
                   >
