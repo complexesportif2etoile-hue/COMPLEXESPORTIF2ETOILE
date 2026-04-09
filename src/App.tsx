@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { UpdatePrompt } from './components/UpdatePrompt/UpdatePrompt';
 import { DataProvider, useData } from './contexts/DataContext';
@@ -119,10 +120,12 @@ function AppViews({ currentView, onViewChange }: { currentView: string; onViewCh
 
 function App() {
   return (
-    <AuthProvider>
-      <UpdatePrompt />
-      <AppContent />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <UpdatePrompt />
+        <AppContent />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 
