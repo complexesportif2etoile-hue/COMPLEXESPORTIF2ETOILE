@@ -5,6 +5,8 @@ import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Reservation } from '../../types';
 import { format, parseISO } from '../utils/dateUtils';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 const STATUT_LABELS: Record<string, string> = {
   en_attente: 'En attente', libre: 'Libre', réservé: 'Réservé',
@@ -133,6 +135,100 @@ export function ClientMenu() {
     if (!window.confirm('Annuler cette réservation ?')) return;
     await supabase.from('reservations').update({ statut: 'annulé' }).eq('id', r.id);
     await refreshReservations();
+  };
+
+  const handleGenerateInvoice = async (r: Reservation) => {
+    const invoiceContent = document.createElement('div');
+    invoiceContent.innerHTML = `
+      <div style="padding: 40px; font-family: Arial, sans-serif; line-height: 1.6;">
+        <div style="text-align: center; margin-bottom: 40px; border-bottom: 2px solid #333; padding-bottom: 20px;">
+          <h1 style="margin: 0; font-size: 28px;">FACTURE</h1>
+          <p style="margin: 5px 0; color: #666;">#${r.code_court || r.id.slice(0, 8)}</p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 40px;">
+          <div>
+            <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #666; text-transform: uppercase;">Facturé à</h3>
+            <p style="margin: 0; font-weight: bold; font-size: 16px;">${r.client_name}</p>
+            <p style="margin: 5px 0 0 0; color: #666;">${r.client_phone}</p>
+          </div>
+          <div style="text-align: right;">
+            <p style="margin: 0; color: #666;"><strong>Date:</strong> ${new Date().toLocaleDateString('fr-FR')}</p>
+            <p style="margin: 5px 0 0 0; color: #666;"><strong>Réservation:</strong> ${format(parseISO(r.date_debut), 'dd/MM/yyyy')}</p>
+          </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+          <thead>
+            <tr style="background-color: #f0f0f0; border-top: 2px solid #333; border-bottom: 2px solid #333;">
+              <th style="padding: 12px; text-align: left; font-weight: bold;">Description</th>
+              <th style="padding: 12px; text-align: right; font-weight: bold;">Montant</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid #ddd;">
+              <td style="padding: 12px; text-align: left;">${r.terrain?.name || 'Terrain'}</td>
+              <td style="padding: 12px; text-align: right;">${fmt(r.amount_due)} FCFA</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 40px;">
+          <div style="width: 300px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; border-top: 2px solid #333; padding-top: 15px;">
+              <div style="text-align: left;">
+                <p style="margin: 0; color: #666; font-size: 14px;">Montant dû:</p>
+                <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 18px;">${fmt(r.amount_due)} FCFA</p>
+              </div>
+              <div style="text-align: left;">
+                <p style="margin: 0; color: #666; font-size: 14px;">Montant payé:</p>
+                <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 18px; color: #10b981;">${fmt(r.amount_paid)} FCFA</p>
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; border-top: 1px solid #ddd; margin-top: 15px; padding-top: 15px;">
+              <div style="text-align: left;">
+                <p style="margin: 0; color: #666; font-size: 12px;">Reste:</p>
+                <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 16px; color: ${r.amount_due - r.amount_paid > 0 ? '#ef4444' : '#10b981'};">${fmt(r.amount_due - r.amount_paid)} FCFA</p>
+              </div>
+              <div style="text-align: left;">
+                <p style="margin: 0; color: #666; font-size: 12px;">Statut:</p>
+                <p style="margin: 5px 0 0 0; font-weight: bold; font-size: 14px;">${PAYMENT_LABELS[r.payment_status]}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="text-align: center; color: #999; font-size: 12px; border-top: 1px solid #ddd; padding-top: 20px;">
+          <p style="margin: 0;">Merci pour votre réservation</p>
+        </div>
+      </div>
+    `;
+    invoiceContent.style.width = '210mm';
+    invoiceContent.style.height = '297mm';
+    invoiceContent.style.position = 'absolute';
+    invoiceContent.style.left = '-9999px';
+    document.body.appendChild(invoiceContent);
+
+    try {
+      const canvas = await html2canvas(invoiceContent, {
+        scale: 2,
+        logging: false,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+      });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Facture_${r.code_court || r.id.slice(0, 8)}.pdf`);
+    } finally {
+      document.body.removeChild(invoiceContent);
+    }
   };
 
   return (
@@ -297,8 +393,9 @@ export function ClientMenu() {
                     </button>
                   )}
                   <button
+                    onClick={() => handleGenerateInvoice(r)}
                     className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-xs transition-all border border-slate-700"
-                    title="Facture"
+                    title="Générer facture"
                   >
                     <FileText className="w-3.5 h-3.5" />
                   </button>
