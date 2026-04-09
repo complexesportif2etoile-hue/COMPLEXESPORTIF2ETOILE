@@ -333,25 +333,37 @@ export function ReservationModal({ reservation, initialDate, initialTerrainId, o
           </div>
 
           {selectedSlots.length > 0 && range && (
-            <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-3">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-xs text-slate-400">
-                  {pad(range.debut.getDate())}/{pad(range.debut.getMonth() + 1)} {pad(range.debut.getHours())}h00
-                  {' → '}
-                  {pad(range.fin.getDate())}/{pad(range.fin.getMonth() + 1)} {pad(range.fin.getHours())}h00
-                </span>
-                <span className="text-xs text-slate-500">{selectedSlots.length}h</span>
+            <div className="bg-gradient-to-br from-emerald-500/15 to-emerald-500/5 border-2 border-emerald-500/40 rounded-xl p-4 shadow-lg">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-bold text-emerald-300">Résumé de la réservation</h4>
+                <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-lg font-semibold">{selectedSlots.length}h</span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-400">Total</span>
-                <span className="text-base font-bold text-white">{fmt(total)} FCFA</span>
+
+              <div className="space-y-2.5 mb-3">
+                <div className="bg-slate-800/60 rounded-lg px-3 py-2">
+                  <p className="text-[11px] text-slate-500 mb-1">Période</p>
+                  <p className="text-sm font-semibold text-white">
+                    {pad(range.debut.getDate())}/{pad(range.debut.getMonth() + 1)} à {pad(range.debut.getHours())}h00
+                    <span className="text-slate-400 mx-2">→</span>
+                    {pad(range.fin.getDate())}/{pad(range.fin.getMonth() + 1)} à {pad(range.fin.getHours())}h00
+                  </p>
+                </div>
+
+                <div className="bg-emerald-500/10 rounded-lg px-3 py-2">
+                  <p className="text-[11px] text-slate-500 mb-1">Tarif total</p>
+                  <p className="text-lg font-bold text-emerald-300">{fmt(total)} FCFA</p>
+                </div>
               </div>
-              <div className="flex gap-3 mt-2 pt-2 border-t border-slate-700/50">
-                {sortedSlots.map((s, i) => (
-                  <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded ${s.isNight ? 'bg-blue-500/10 text-blue-400' : 'bg-amber-500/10 text-amber-400'}`}>
-                    {s.label}
-                  </span>
-                ))}
+
+              <div className="bg-slate-800/40 rounded-lg px-3 py-2">
+                <p className="text-[11px] text-slate-500 mb-2">Créneaux sélectionnés</p>
+                <div className="flex flex-wrap gap-2">
+                  {sortedSlots.map((s, i) => (
+                    <span key={i} className={`text-xs px-2.5 py-1 rounded-lg font-medium ${s.isNight ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}`}>
+                      {s.label}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           )}
