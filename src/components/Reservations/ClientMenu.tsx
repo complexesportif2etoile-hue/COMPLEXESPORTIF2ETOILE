@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Search, CreditCard, X, Loader2, LogIn, LogOut, RotateCcw, ChevronDown, FileText, Trash2 } from 'lucide-react';
+import { Search, CreditCard, X, Loader2, LogIn, LogOut, RotateCcw, ChevronDown, FileText, Trash2, Plus, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -71,6 +71,11 @@ export function ClientMenu() {
   const [payMethod, setPayMethod] = useState('especes');
   const [payType, setPayType] = useState('solde');
   const [loading, setLoading] = useState(false);
+  const [inlinePayId, setInlinePayId] = useState<string | null>(null);
+  const [inlineAmount, setInlineAmount] = useState('');
+  const [inlineMethod, setInlineMethod] = useState('especes');
+  const [inlineType, setInlineType] = useState('solde');
+  const [inlineLoading, setInlineLoading] = useState(false);
 
   const canManage = hasPermission('manage_reservations');
   const canPay = hasPermission('manage_payments');
@@ -137,6 +142,34 @@ export function ClientMenu() {
     if (!window.confirm('Annuler cette réservation ?')) return;
     await supabase.from('reservations').update({ statut: 'annulé' }).eq('id', r.id);
     await refreshReservations();
+  };
+
+  const handleInlinePay = async (r: Reservation) => {
+    if (!inlineAmount || parseFloat(inlineAmount) <= 0) return;
+    setInlineLoading(true);
+    const amount = parseFloat(inlineAmount);
+    const total = getEncaissementsForRes(r.id).reduce((s, e) => s + e.montant_total, 0) + amount;
+    const newStatus = total >= r.amount_due ? 'PAID' : total > 0 ? 'PARTIAL' : 'UNPAID';
+    try {
+      const { error: encErr } = await supabase.from('encaissements').insert({
+        reservation_id: r.id,
+        montant_total: amount,
+        mode_paiement: inlineMethod,
+        type_versement: inlineType,
+      });
+      if (encErr) throw encErr;
+      const { error: resErr } = await supabase.from('reservations').update({
+        payment_status: newStatus,
+        amount_paid: total,
+      }).eq('id', r.id);
+      if (resErr) throw resErr;
+      await Promise.all([refreshReservations(), refreshEncaissements()]);
+      setInlinePayId(null);
+      setInlineAmount('');
+      setInlineType('solde');
+      setInlineMethod('especes');
+    } catch (err) { console.error(err); }
+    setInlineLoading(false);
   };
 
   const TYPE_VERSEMENT_LABELS: Record<string, string> = {
@@ -428,9 +461,11 @@ export function ClientMenu() {
                   </div>
                   {(() => {
                     const resEnc = getEncaissementsForRes(r.id);
-                    if (resEnc.length === 0) return null;
+                    const showInline = inlinePayId === r.id;
+                    const canAddPayment = canPay && r.payment_status !== 'PAID' && !['annulé', 'terminé'].includes(r.statut);
+                    if (resEnc.length === 0 && !canAddPayment) return null;
                     return (
-                      <div className="mt-2 pt-2 border-t border-slate-800 space-y-1">
+                      <div className="mt-2 pt-2 border-t border-slate-800 space-y-1.5">
                         {resEnc.map((enc) => {
                           const tv = enc.type_versement || 'solde';
                           const tvLabel = { avance: 'Avance', acompte: 'Acompte', solde: 'Solde', autre: 'Autre' }[tv] || tv;
@@ -451,6 +486,64 @@ export function ClientMenu() {
                             </div>
                           );
                         })}
+                        {canAddPayment && !showInline && (
+                          <button
+                            onClick={() => { setInlinePayId(r.id); setInlineAmount(''); setInlineType('solde'); setInlineMethod('especes'); }}
+                            className="flex items-center gap-1 text-[11px] text-emerald-500 hover:text-emerald-400 font-medium transition-colors mt-0.5"
+                          >
+                            <Plus className="w-3 h-3" /> Ajouter un versement
+                          </button>
+                        )}
+                        {canAddPayment && showInline && (
+                          <div className="mt-1.5 pt-2 border-t border-slate-700/50 space-y-2">
+                            <div className="flex gap-2">
+                              <select
+                                value={inlineType}
+                                onChange={(e) => setInlineType(e.target.value)}
+                                className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              >
+                                <option value="avance">Avance</option>
+                                <option value="acompte">Acompte</option>
+                                <option value="solde">Solde</option>
+                                <option value="autre">Autre</option>
+                              </select>
+                              <select
+                                value={inlineMethod}
+                                onChange={(e) => setInlineMethod(e.target.value)}
+                                className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              >
+                                <option value="especes">Espèces</option>
+                                <option value="wave">Wave</option>
+                                <option value="orange_money">Orange Money</option>
+                                <option value="mixte">Mixte</option>
+                                <option value="autre">Autre</option>
+                              </select>
+                            </div>
+                            <div className="flex gap-2 items-center">
+                              <input
+                                type="number"
+                                min="1"
+                                value={inlineAmount}
+                                onChange={(e) => setInlineAmount(e.target.value)}
+                                placeholder={`Montant (reste: ${fmt(r.amount_due - r.amount_paid)})`}
+                                className="flex-1 bg-slate-800 border border-slate-700 text-slate-100 placeholder-slate-500 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              />
+                              <button
+                                onClick={() => handleInlinePay(r)}
+                                disabled={inlineLoading || !inlineAmount}
+                                className="p-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white rounded-lg transition-all"
+                              >
+                                {inlineLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => setInlinePayId(null)}
+                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg transition-all"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
