@@ -426,6 +426,34 @@ export function ClientMenu() {
                       {fmt(r.amount_due)} <span className="text-xs text-slate-400 font-normal">CFA</span>
                     </span>
                   </div>
+                  {(() => {
+                    const resEnc = getEncaissementsForRes(r.id);
+                    if (resEnc.length === 0) return null;
+                    return (
+                      <div className="mt-2 pt-2 border-t border-slate-800 space-y-1">
+                        {resEnc.map((enc) => {
+                          const tv = enc.type_versement || 'solde';
+                          const tvLabel = { avance: 'Avance', acompte: 'Acompte', solde: 'Solde', autre: 'Autre' }[tv] || tv;
+                          const modeLabel = { especes: 'Espèces', wave: 'Wave', orange_money: 'Orange Money', mixte: 'Mixte', autre: 'Autre' }[enc.mode_paiement] || enc.mode_paiement;
+                          const tvColor =
+                            tv === 'avance' ? 'bg-orange-500/15 text-orange-300 border-orange-500/30' :
+                            tv === 'acompte' ? 'bg-sky-500/15 text-sky-300 border-sky-500/30' :
+                            'bg-slate-700/50 text-slate-400 border-slate-600/30';
+                          return (
+                            <div key={enc.id} className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md border ${tvColor}`}>
+                                  {tvLabel}
+                                </span>
+                                <span className="text-[10px] text-slate-500">{modeLabel}</span>
+                              </div>
+                              <span className="text-[11px] font-semibold text-emerald-400">{fmt(enc.montant_total)} CFA</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
